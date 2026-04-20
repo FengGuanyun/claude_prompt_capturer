@@ -169,8 +169,14 @@
             ro.observe(document.getElementById('terminal-container'));
         }
 
+        function getSessionId() {
+            const match = document.cookie.match(/session_id=([^;]+)/);
+            return match ? match[1] : '';
+        }
+
         function connect() {
-            const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':8081';
+            const sid = getSessionId();
+            const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':8081' + (sid ? '?session_id=' + sid : '');
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {

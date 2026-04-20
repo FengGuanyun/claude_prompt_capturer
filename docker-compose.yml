@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  # Main orchestrator — handles HTTP, WebSocket, and Docker session management
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude-orchestrator
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./workspaces:/app/workspaces
+      - $HOME/.claude/settings.json:/root/.claude/settings.json:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - claude-net
+      - session-net
+
+  # Isolated Docker network for user sessions
+  # Sessions are created dynamically by the orchestrator
+
+networks:
+  claude-net:
+    driver: bridge
+  session-net:
+    driver: bridge
+    internal: false
