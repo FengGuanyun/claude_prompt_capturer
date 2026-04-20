@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; overflow: hidden; }
+        body { background: #0a0e14; display: flex; flex-direction: column; }
+        .header { height: 40px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; align-items: center; padding: 0 15px; flex-shrink: 0; }
+        .header h1 { font-size: 15px; color: #79c0ff; font-weight: 700; letter-spacing: 0.5px; }
+        .header-info { margin-left: auto; font-size: 13px; color: #8b949e; }
+        .tab-bar { display: flex; gap: 4px; margin-left: 24px; }
+        .tab-btn { padding: 6px 14px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 6px; font-size: 13px; text-decoration: none; transition: all 0.2s; }
+        .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
+        .tab-btn.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
+        .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+        .terminal-panel { flex: 0 0 32%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; height: 100%; position: relative; }
+        .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 300px; height: 100%; }
+        .panel-header { padding: 10px 15px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .panel-title { font-size: 14px; color: #e6edf3; font-weight: 600; }
+        .captured-count { background: #e8870a; color: #0a0e14; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; font-weight: 700; }
+        #terminal-container { flex: 1; min-height: 0; overflow: hidden; }
+        .status { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 15px; background: rgba(17,22,32,0.95); font-size: 12px; color: #8b949e; border-top: 1px solid #2a3040; z-index: 10; }
+        .captured-list { flex: 1; overflow-y: auto; padding: 10px; min-height: 0; }
+        .captured-item { background: #111620; border: 1px solid #2a3040; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+        .captured-header { padding: 10px 12px; background: #1a2030; cursor: pointer; font-size: 13px; display: flex; align-items: center; }
+        .captured-header:hover { background: #232b3d; }
+        .captured-header::before { content: '▶'; font-size: 8px; margin-right: 8px; color: #4a5568; transition: transform 0.15s; flex-shrink: 0; }
+        .captured-item.open .captured-header::before { transform: rotate(90deg); color: #79c0ff; }
+        .captured-time { color: #6e7a8a; font-size: 12px; }
+        .captured-model { color: #79c0ff; margin-left: 10px; font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 12px; font-weight: 600; }
+        .captured-body { display: none; padding: 12px; font-size: 13px; }
+        .captured-body.show { display: block; }
+        .section { margin-bottom: 14px; }
+        .section-title { color: #e8870a; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+        .section-title.collapsible { cursor: pointer; user-select: none; }
+        .section-title.collapsible::after { content: '▶'; font-size: 9px; color: #4a5568; margin-left: auto; transition: transform 0.15s; flex-shrink: 0; }
+        .section-title.collapsible.expanded::after { transform: rotate(90deg); color: #79c0ff; }
+        .section-content.collapsed { display: none; }
+        .block-body.collapsed { display: none; }
+        .section-content { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 12px; font-size: 14px; white-space: pre-wrap; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, monospace; line-height: 1.7; color: #c9d1d9; word-break: break-word; max-height: none; }
+        .section-content.markdown-view { white-space: normal; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.8; }
+        .section-content.markdown-view h1 { font-size: 20px; margin: 12px 0 6px; color: #e6edf3; }
+        .section-content.markdown-view h2 { font-size: 17px; margin: 10px 0 5px; color: #e6edf3; }
+        .section-content.markdown-view h3 { font-size: 15px; margin: 8px 0 4px; color: #e6edf3; }
+        .section-content.markdown-view p { margin: 6px 0; }
+        .section-content.markdown-view code { background: #161b22; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, monospace; font-size: 13px; }
+        .section-content.markdown-view pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+        .section-content.markdown-view pre code { background: none; padding: 0; font-size: 13px; }
+        .section-content.markdown-view ul, .section-content.markdown-view ol { padding-left: 24px; margin: 6px 0; }
+        .section-content.markdown-view li { margin: 3px 0; }
+        .section-content.markdown-view blockquote { border-left: 3px solid #30363d; padding-left: 12px; color: #8b949e; margin: 6px 0; }
+        .section-content.markdown-view table { border-collapse: collapse; margin: 8px 0; }
+        .section-content.markdown-view th, .section-content.markdown-view td { border: 1px solid #30363d; padding: 6px 10px; }
+        .section-content.markdown-view th { background: #161b22; }
+        .section-content.markdown-view a { color: #79c0ff; }
+        .message { margin-bottom: 10px; padding: 10px; background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; }
+        .message-role { font-weight: 700; font-size: 12px; margin-bottom: 6px; color: #56d364; text-transform: uppercase; letter-spacing: 0.3px; }
+        .message-role.assistant { color: #79c0ff; }
+        .message-role.system { color: #d2a8ff; }
+        .message-content { font-size: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; color: #c9d1d9; max-height: 300px; overflow-y: auto; }
+
+        /* Content blocks per message */
+        .content-block { margin: 6px 0; padding: 10px 12px; border-radius: 5px; font-size: 14px; }
+        .block-text { background: #0d1117; border: 1px solid #1e2530; }
+        .block-text .block-label { color: #56d364; font-size: 10px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .block-text .block-body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin-top: 4px; color: #c9d1d9; max-height: 300px; overflow-y: auto; }
+        .block-tool_use { background: #1a150a; border: 1px solid #3d2e10; }
+        .block-tool_use .block-label { color: #e8870a; font-size: 10px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .block-tool_use .block-body { white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin-top: 4px; color: #e8870a; max-height: 150px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, monospace; font-size: 13px; }
+        .block-tool_result { background: #0d1a10; border: 1px solid #1e3320; }
+        .block-tool_result .block-label { color: #56d364; font-size: 10px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .block-tool_result .block-body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin-top: 4px; color: #c9d1d9; max-height: 200px; overflow-y: auto; }
+        .block-system-reminder { background: #1a1520; border: 1px solid #3d1a30; border-left: 3px solid #d2a8ff; }
+        .block-system-reminder .block-label { color: #d2a8ff; font-size: 10px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .block-system-reminder .block-body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin-top: 4px; color: #c9d1d9; max-height: 200px; overflow-y: auto; }
+        .block-thinking { background: #151520; border: 1px solid #2d2d40; border-left: 3px solid #6b6b9a; }
+        .block-thinking .block-label { color: #9a9aca; font-size: 10px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .block-thinking .block-body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin-top: 4px; color: #9a9aca; max-height: 200px; overflow-y: auto; }
+        .btn { background: #1a7f37; color: white; border: none; padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 600; }
+        .btn:hover { background: #2da64b; }
+        .btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+        .fmt-btn { background: transparent; color: #79c0ff; border: 1px solid #2a4a8a; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; }
+        .fmt-btn:hover { background: #1a3a7a; }
+        .fmt-btn.active { background: #1a3a7a; color: #a5d6ff; }
+        #terminal-container .xterm { height: 100%; padding: 0; }
+        #terminal-container .xterm-viewport { overflow-y: auto !important; }
+        .status { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 15px; background: rgba(17,22,32,0.95); font-size: 12px; color: #8b949e; border-top: 1px solid #2a3040; z-index: 10; }
+        .status.success { color: #56d364; }
+        .status.error { color: #f85149; }
+        .empty-state { color: #4a5568; text-align: center; padding: 40px; font-size: 13px; line-height: 1.8; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Claude Terminal</h1>
+        <div class="tab-bar">
+            <a href="/agent" class="tab-btn" onclick="highlightTab(this)">🤖 Agent</a>
+            <a href="/" class="tab-btn active" onclick="highlightTab(this)">🖥️ 终端</a>
+        </div>
+        <div class="header-info" id="modelInfo">Loading...</div>
+    </div>
+
+    <div class="main">
+        <div class="terminal-panel">
+            <div id="terminal-container"></div>
+            <div class="status" id="status">Connecting...</div>
+        </div>
+
+        <div class="captured-panel">
+            <div class="panel-header">
+                <span class="panel-title">Captured Prompts <span class="captured-count" id="captured-count">0</span></span>
+                <button class="btn" onclick="clearCaptured()">Clear</button>
+            </div>
+            <div class="captured-list" id="capturedList">
+                <div class="empty-state">No captured requests yet.<br>CLI needs to use proxy for capturing.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script>
+        let ws = null;
+        let term = null;
+        let capturedData = [];
+
+        // Tab navigation
+        function highlightTab(btn) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const path = window.location.pathname;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.getAttribute('href') === path) btn.classList.add('active');
+            });
+        });
+
+        // Load config
+        fetch('/api_key').then(r => r.json()).then(cfg => {
+            document.getElementById('modelInfo').textContent = cfg.model + ' @ ' + new URL(cfg.base_url).hostname;
+        });
+
+        function initTerminal() {
+            term = new Terminal({
+                cursorBlink: true,
+                fontSize: 15,
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                theme: {
+                    background: '#0d1117',
+                    foreground: '#c9d1d9',
+                    cursor: '#c9d1d9',
+                    cursorAccent: '#0d1117',
+                    selectionBackground: '#264f78'
+                }
+            });
+            const fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(document.getElementById('terminal-container'));
+            fitAddon.fit();
+            term.write('Connecting to Claude CLI...\r\n');
+
+            // Refit terminal when window resizes
+            const ro = new ResizeObserver(() => { fitAddon && fitAddon.fit(); });
+            ro.observe(document.getElementById('terminal-container'));
+        }
+
+        function connect() {
+            const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':8081';
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status success';
+            };
+
+            ws.onmessage = (event) => {
+                if (term) term.write(event.data);
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected - Claude CLI not available on server';
+                document.getElementById('status').className = 'status error';
+                if (term) term.write('\r\n\x1b[31mClaude CLI is not installed on the server.\x1b[0m\r\n');
+                if (term) term.write('Use the Agent tab to chat with Claude.\r\n');
+            };
+
+            ws.onerror = () => {
+                document.getElementById('status').textContent = 'Connection error - Claude CLI not available';
+                document.getElementById('status').className = 'status error';
+                if (term) term.write('\r\n\x1b[31mCannot connect to Claude CLI.\x1b[0m\r\n');
+                if (term) term.write('Use the Agent tab to chat with Claude.\r\n');
+            };
+
+            if (term) {
+                term.onData((data) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(data);
+                    }
+                });
+            }
+        }
+
+        let expandedIds = new Set();
+        let expandedSysIds = new Set();
+        let markdownMode = new Set(); // ids with markdown mode enabled for system prompt
+        let expandedReminderIds = new Set(); // expanded system-reminder blocks (key: "msgIdx_blockIdx")
+        let reminderMarkdownMode = new Set(); // markdown mode per reminder block
+        let reminderRawText = {}; // store raw text per key
+
+        function toggleReminder(id, blockIdx, event) {
+            event.stopPropagation();
+            const key = id + '_' + blockIdx;
+            if (expandedReminderIds.has(key)) {
+                expandedReminderIds.delete(key);
+            } else {
+                expandedReminderIds.add(key);
+            }
+            const title = document.getElementById('remindertitle_' + key);
+            const content = document.getElementById('remindercontent_' + key);
+            if (title) title.classList.toggle('expanded', expandedReminderIds.has(key));
+            if (content) content.classList.toggle('collapsed', !expandedReminderIds.has(key));
+        }
+
+        function toggleReminderFormat(id, blockIdx, event) {
+            event.stopPropagation();
+            const key = id + '_' + blockIdx;
+            const btn = document.getElementById('reminderfmtbtn_' + key);
+            const content = document.getElementById('remindercontent_' + key);
+            const rawText = reminderRawText[key] || '';
+            if (reminderMarkdownMode.has(key)) {
+                reminderMarkdownMode.delete(key);
+                btn.classList.remove('active');
+                btn.textContent = 'Markdown';
+                content.classList.remove('markdown-view');
+                content.textContent = rawText;
+            } else {
+                reminderMarkdownMode.add(key);
+                btn.classList.add('active');
+                btn.textContent = '原文';
+                content.classList.add('markdown-view');
+                content.innerHTML = renderMarkdown(rawText);
+            }
+        }
+
+        // Simple markdown to HTML renderer
+        function renderMarkdown(text) {
+            let html = text;
+            // Code blocks (```)
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>');
+            // Inline code
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Headers
+            html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+            // Bold and italic
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            // Links
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+            // Blockquotes
+            html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+            // Unordered lists
+            html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+            html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+            // Tables
+            html = html.replace(/^\|(.+)\|$/gm, function(match, content) {
+                const cells = content.split('|').map(c => c.trim());
+                if (cells.every(c => /^[-:]+$/.test(c))) return '<!--table-sep-->';
+                return '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+            });
+            html = html.replace(/((<tr>.*<\/tr>\n?)+)/g, '<table>$1</table>');
+            html = html.replace(/<!--table-sep-->\n?/g, '');
+            // Paragraphs (double newline)
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = html.replace(/\n/g, '<br>');
+            html = '<p>' + html + '</p>';
+            // Clean up empty paragraphs
+            html = html.replace(/<p>\s*<\/p>/g, '');
+            html = html.replace(/<p>\s*(<h[1-3]>)/g, '$1');
+            html = html.replace(/(<\/h[1-3]>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<pre>)/g, '$1');
+            html = html.replace(/(<\/pre>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<table>)/g, '$1');
+            html = html.replace(/(<\/table>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<ul>)/g, '$1');
+            html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<blockquote>)/g, '$1');
+            html = html.replace(/(<\/blockquote>)\s*<\/p>/g, '$1');
+            return html;
+        }
+
+        function toggleFormat(id, event) {
+            event.stopPropagation();
+            const btn = document.getElementById('fmtbtn' + id);
+            const content = document.getElementById('syscontent' + id);
+            if (markdownMode.has(id)) {
+                markdownMode.delete(id);
+                btn.classList.remove('active');
+                btn.textContent = 'Markdown';
+                content.classList.remove('markdown-view');
+                content.textContent = capturedData[id].system_prompt;
+            } else {
+                markdownMode.add(id);
+                btn.classList.add('active');
+                btn.textContent = '原文';
+                content.classList.add('markdown-view');
+                content.innerHTML = renderMarkdown(capturedData[id].system_prompt);
+            }
+        }
+
+        async function loadCaptured() {
+            try {
+                const res = await fetch('/captured');
+                const data = await res.json();
+                document.getElementById('captured-count').textContent = data.count;
+                capturedData = data.requests;
+                renderCaptured(capturedData);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function toggleItem(id) {
+            if (expandedIds.has(id)) {
+                expandedIds.delete(id);
+            } else {
+                expandedIds.add(id);
+            }
+            const item = document.querySelector(`[data-id="${id}"]`);
+            const body = document.getElementById('cb' + id);
+            if (item) item.classList.toggle('open', expandedIds.has(id));
+            if (body) body.classList.toggle('show', expandedIds.has(id));
+        }
+
+        function toggleSysPrompt(id) {
+            if (expandedSysIds.has(id)) {
+                expandedSysIds.delete(id);
+            } else {
+                expandedSysIds.add(id);
+            }
+            const title = document.getElementById('systitle' + id);
+            const content = document.getElementById('syscontent' + id);
+            if (title) title.classList.toggle('expanded', expandedSysIds.has(id));
+            if (content) content.classList.toggle('collapsed', !expandedSysIds.has(id));
+        }
+
+        function renderCaptured(requests) {
+            const list = document.getElementById('capturedList');
+            if (!requests || requests.length === 0) {
+                list.innerHTML = '<div class="empty-state">No captured requests yet.<br>CLI needs to use proxy for capturing.</div>';
+                return;
+            }
+
+            // Only re-render if count changed to avoid losing expand state
+            const existingCount = list.querySelectorAll('.captured-item').length;
+            if (existingCount !== requests.length) {
+                list.innerHTML = requests.map((r, i) => {
+                    const id = i;
+                    const isOpen = expandedIds.has(id);
+                    return `
+                    <div class="captured-item ${isOpen ? 'open' : ''}" data-id="${id}">
+                        <div class="captured-header" onclick="toggleItem(${id})">
+                            <span class="captured-time">${r.timestamp}</span>
+                            <span class="captured-model">${escapeHtml(r.model)}</span>
+                        </div>
+                        <div class="captured-body ${isOpen ? 'show' : ''}" id="cb${id}">
+                            ${r.system_prompt ? `
+                            <div class="section">
+                                <div class="section-title collapsible" id="systitle${id}" onclick="toggleSysPrompt(${id}); event.stopPropagation();">
+                                    System Prompt (${r.system_tokens} tokens)
+                                    <button class="fmt-btn" id="fmtbtn${id}" onclick="toggleFormat(${id}, event)">Markdown</button>
+                                </div>
+                                <div class="section-content collapsed" id="syscontent${id}">${escapeHtml(r.system_prompt)}</div>
+                            </div>` : ''}
+                            <div class="section"><div class="section-title">Messages</div>
+                                ${r.messages.map(m => {
+                                    const hasArray = m.content_array && m.content_array.length > 0;
+                                    return `
+                                    <div class="message">
+                                        <div class="message-role ${m.role}">${m.role} (~${m.tokens} tokens)</div>
+                                        ${hasArray ? `
+                                            ${m.content_array.map((b, bi) => {
+                                                const type = b.type || 'text';
+                                                const blockContent = b.text || b.content || (b.input ? JSON.stringify(b.input, null, 2) : '');
+                                                if (type === 'system-reminder') {
+                                                    const key = i + '_' + bi;
+                                                    const isExpanded = expandedReminderIds.has(key);
+                                                    reminderRawText[key] = blockContent;
+                                                    return `<div class="content-block block-system-reminder" style="overflow:hidden;">
+                                                        <div class="block-label collapsible ${isExpanded ? 'expanded' : ''}" id="remindertitle_${key}" onclick="toggleReminder(${i}, ${bi}, event)" style="cursor:pointer;">
+                                                            system-reminder
+                                                        </div>
+                                                        <div class="block-body collapsed" id="remindercontent_${key}">${escapeHtml(blockContent)}</div>
+                                                    </div>`;
+                                                }
+                                                if (type === 'thinking') {
+                                                    return `<div class="content-block block-thinking">
+                                                        <div class="block-label">thinking</div>
+                                                        <div class="block-body">${escapeHtml(blockContent)}</div>
+                                                    </div>`;
+                                                }
+                                                if (type === 'text' && blockContent.includes('<thinking>') && blockContent.includes('</thinking>')) {
+                                                    // Extract and display thinking separately
+                                                    const thinkingMatch = blockContent.match(/<thinking>([\s\S]*?)<\/thinking>/g);
+                                                    const regularText = blockContent.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+                                                    let html = '';
+                                                    if (thinkingMatch) {
+                                                        for (const tm of thinkingMatch) {
+                                                            const thinkingText = tm.replace(/<\/?thinking>/g, '');
+                                                            html += `<div class="content-block block-thinking">
+                                                                <div class="block-label">thinking</div>
+                                                                <div class="block-body">${escapeHtml(thinkingText)}</div>
+                                                            </div>`;
+                                                        }
+                                                    }
+                                                    if (regularText) {
+                                                        html += `<div class="content-block block-text">
+                                                            <div class="block-label">text</div>
+                                                            <div class="block-body">${escapeHtml(regularText)}</div>
+                                                        </div>`;
+                                                    }
+                                                    return html;
+                                                }
+                                                return `<div class="content-block block-${type}">
+                                                    <div class="block-label">${escapeHtml(type)}${b.name ? ' — ' + escapeHtml(b.name) : ''}${b.tool_use_id ? ' (' + escapeHtml(b.tool_use_id) + ')' : ''}</div>
+                                                    <div class="block-body">${escapeHtml(blockContent)}</div>
+                                                </div>`;
+                                            }).join('')}
+                                        ` : `<div class="message-content">${escapeHtml(m.content || m.content_preview || '')}</div>`}
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                            ${r.tools_count > 0 ? `<div class="section">
+                                <div class="section-title">Tools (${r.tools_count})</div>
+                                ${r.tools.map((t, ti) => {
+                                    const name = t.name || t.function?.name || '?';
+                                    const toolKey = i + '_tool_' + ti;
+                                    return `<div class="content-block block-tool_use" style="margin:4px 0; overflow:hidden;">
+                                        <div class="block-label collapsible" style="cursor:pointer;" id="toollbl_${toolKey}" onclick="toggleTool(${i}, ${ti}, event)">
+                                            <span>${escapeHtml(name)}</span>
+                                        </div>
+                                        <div id="toolbody_${toolKey}"></div>
+                                    </div>`;
+                                }).join('')}
+                            </div>` : ''}
+                        </div>
+                    </div>
+                `}).join('');
+            }
+        }
+
+        function escapeHtml(t) {
+            const d = document.createElement('div');
+            d.textContent = t;
+            return d.innerHTML;
+        }
+
+        function escapeAttr(t) {
+            return (t || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        let expandedToolIds = new Set();
+
+        function toggleTool(msgIdx, toolIdx, event) {
+            event.stopPropagation();
+            const key = msgIdx + '_tool_' + toolIdx;
+            const lbl = document.getElementById('toollbl_' + key);
+            const body = document.getElementById('toolbody_' + key);
+            if (expandedToolIds.has(key)) {
+                expandedToolIds.delete(key);
+                lbl.classList.remove('expanded');
+                body.innerHTML = '';
+            } else {
+                expandedToolIds.add(key);
+                lbl.classList.add('expanded');
+                // Retrieve the raw tool data from capturedData
+                const req = capturedData[msgIdx];
+                const tool = req.tools[toolIdx];
+                body.innerHTML = renderToolFullKeys(tool);
+            }
+        }
+
+        // Recursively render every key in the tool object
+        function renderToolFullKeys(obj, depth) {
+            if (!depth) depth = 0;
+            if (obj === null) return '<span style="color:#d2a8ff;">null</span>';
+            if (typeof obj !== 'object') {
+                const s = escapeHtml(JSON.stringify(obj));
+                const color = typeof obj === 'boolean' ? '#d2a8ff' : '#c9d1d9';
+                return `<span style="color:${color};">${s}</span>`;
+            }
+            if (Array.isArray(obj)) {
+                if (obj.length === 0) return '<span style="color:#8b949e;">[]</span>';
+                let html = '<div style="color:#8b949e;">[</div><div style="margin-left:16px;">';
+                obj.forEach((item, i) => {
+                    html += `<div style="margin:2px 0;"><span style="color:#8b949e;">[${i}]</span> ${renderToolFullKeys(item, depth + 1)}</div>`;
+                });
+                html += '</div><div style="color:#8b949e;">]</div>';
+                return html;
+            }
+            let html = '<div style="margin-left:' + (depth > 0 ? '16px' : '0px') + ';">';
+            for (const [key, val] of Object.entries(obj)) {
+                if (val !== null && typeof val === 'object') {
+                    const isArray = Array.isArray(val);
+                    const isEmpty = isArray ? val.length === 0 : Object.keys(val).length === 0;
+                    html += `<div style="margin:4px 0;">`;
+                    html += `<span style="color:#79c0ff;font-weight:600;">${escapeHtml(key)}</span>`;
+                    html += `</div>`;
+                    if (!isEmpty) {
+                        html += renderToolFullKeys(val, depth + 1);
+                    }
+                } else {
+                    html += `<div style="margin:4px 0;">`;
+                    html += `<span style="color:#79c0ff;font-weight:600;">${escapeHtml(key)}</span>`;
+                    html += `<span style="color:#8b949e;">: </span>`;
+                    html += renderToolFullKeys(val, depth + 1);
+                    html += `</div>`;
+                }
+            }
+            html += '</div>';
+            return html;
+        }
+
+        async function clearCaptured() {
+            await fetch('/captured', {method:'DELETE'});
+            loadCaptured();
+        }
+
+        // Auto-refresh captured list
+        setInterval(loadCaptured, 2000);
+
+        initTerminal();
+        connect();
+    </script>
+</body>
+</html>

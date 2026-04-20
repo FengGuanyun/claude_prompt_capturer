@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Agent — 执行流程</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0e14; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Header ── */
+        .header { height: 44px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; align-items: center; padding: 0 16px; flex-shrink: 0; gap: 16px; }
+        .header h1 { font-size: 14px; color: #79c0ff; font-weight: 700; }
+        .header-info { margin-left: auto; font-size: 12px; color: #8b949e; display: flex; gap: 16px; }
+        .header-info .iter { color: #d2a8ff; }
+        .header-info .tool { color: #e8870a; }
+        .header-info .event { color: #56d364; }
+
+        /* Tab navigation */
+        .tab-bar { display: flex; gap: 4px; margin-left: 24px; }
+        .tab-btn { padding: 6px 14px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 6px; font-size: 12px; text-decoration: none; transition: all 0.2s; }
+        .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
+        .tab-btn.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
+
+        /* ── 3-column layout ── */
+        .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+        /* Left: Chat */
+        .chat-panel { flex: 0 0 28%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 280px; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 12px; }
+        .msg { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; max-width: 90%; word-break: break-word; }
+        .msg.user { background: #1a3a5c; margin-left: auto; border-bottom-right-radius: 2px; }
+        .msg.assistant { background: #111d2b; border: 1px solid #1e2530; border-bottom-left-radius: 2px; }
+        .msg .ts { font-size: 10px; color: #4a5568; margin-top: 4px; }
+        .msg .role { font-size: 10px; color: #4a5568; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+        .msg.user .role { color: #3d6a9f; }
+        .msg.assistant .role { color: #4a5568; }
+        .msg pre { white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
+        .msg pre code { background: #0a0e14; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+        .msg blockquote { border-left: 3px solid #30363d; padding-left: 10px; margin: 6px 0; color: #8b949e; }
+        .msg ul, .msg ol { padding-left: 20px; margin: 6px 0; }
+        .msg li { margin: 3px 0; }
+        .msg h1, .msg h2, .msg h3 { margin: 8px 0 4px; }
+        .msg table { border-collapse: collapse; margin: 6px 0; }
+        .msg th, .msg td { border: 1px solid #30363d; padding: 4px 8px; }
+        .msg strong { color: #fff; }
+        .msg a { color: #79c0ff; }
+        .msg-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 13px; line-height: 1.8; }
+
+        /* Input */
+        .input-area { padding: 12px; background: #111620; border-top: 1px solid #2a3040; display: flex; gap: 8px; flex-shrink: 0; }
+        .input-box { flex: 1; background: #0d1117; border: 1px solid #2a3040; border-radius: 8px; padding: 10px 12px; color: #c9d1d9; font-family: inherit; font-size: 13px; resize: none; min-height: 44px; max-height: 120px; line-height: 1.4; }
+        .input-box:focus { outline: none; border-color: #79c0ff; }
+        .send-btn { background: #1a7f37; color: white; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; flex-shrink: 0; align-self: flex-end; }
+        .send-btn:hover { background: #2da64b; }
+        .send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+        /* Middle: Flow Timeline */
+        .flow-panel { flex: 0 0 38%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; background: #0a0e14; }
+        .flow-header { padding: 10px 14px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .flow-header h2 { font-size: 13px; color: #79c0ff; font-weight: 600; }
+        .flow-actions { display: flex; gap: 6px; }
+        .btn-sm { background: transparent; color: #8b949e; border: 1px solid #2a3040; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+        .btn-sm:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
+        .btn-sm.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
+
+        .flow-content { flex: 1; overflow-y: auto; padding: 10px; }
+
+        /* Event Cards */
+        .event-card { margin-bottom: 6px; border-radius: 6px; background: #111620; border: 1px solid #1e2530; overflow: hidden; }
+        .event-header { display: flex; align-items: center; padding: 8px 10px; cursor: pointer; gap: 8px; }
+        .event-header:hover { background: #1a2030; }
+        .event-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+        .icon-text { background: #1a3a5c; } .icon-tool_call { background: #5c2d0a; }
+        .icon-tool_result { background: #0d3320; } .icon-error { background: #3d0a0a; }
+        .icon-iteration_start { background: #2d1a3d; } .icon-iteration_end { background: #1a0d2d; }
+        .icon-prompt_assembled { background: #0a2d3d; } .icon-waiting { background: #1a2030; }
+
+        .event-info { flex: 1; min-width: 0; }
+        .event-type { font-size: 10px; color: #6e7a8a; text-transform: uppercase; font-weight: 700; letter-spacing: 0.3px; }
+        .event-preview { font-size: 12px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+        .event-time { font-size: 10px; color: #4a5568; flex-shrink: 0; }
+        .event-arrow { font-size: 10px; color: #4a5568; transition: transform 0.15s; flex-shrink: 0; }
+        .event-card.open .event-arrow { transform: rotate(90deg); color: #79c0ff; }
+
+        .event-body { display: none; border-top: 1px solid #1e2530; background: #0a0e14; max-height: 350px; overflow-y: auto; }
+        .event-card.open .event-body { display: block; }
+        .event-body pre { padding: 10px 12px; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #8b949e; font-family: 'SF Mono', 'Menlo', monospace; margin: 0; }
+
+        /* Tool call body special formatting */
+        .tool-call-detail { padding: 10px 12px; }
+        .tool-call-detail h4 { font-size: 11px; color: #e8870a; text-transform: uppercase; font-weight: 700; margin: 8px 0 4px; letter-spacing: 0.5px; }
+        .tool-call-detail h4:first-child { margin-top: 0; }
+        .tool-call-detail pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
+        .tool-call-detail .tool-result-body { background: #0d1a10; border-color: #1e3320; }
+        .tool-call-detail .tool-result-body.error { background: #1d0d0d; border-color: #331e1e; }
+
+        /* Prompt assembled special formatting */
+        .prompt-detail { padding: 10px 12px; }
+        .prompt-section { margin-bottom: 12px; }
+        .prompt-section:last-child { margin-bottom: 0; }
+        .prompt-section-title { font-size: 10px; color: #d2a8ff; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+        .prompt-section-title:hover { color: #e0c0ff; }
+        .prompt-section-title .collapse-icon { font-size: 10px; margin-right: 4px; transition: transform 0.2s; display: inline-block; }
+        .prompt-section-title .copy-btn { background: #1a2030; color: #79c0ff; border: 1px solid #2a3040; padding: 1px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; font-family: inherit; }
+        .prompt-section-title .copy-btn:hover { background: #232b3d; }
+        .prompt-section pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #c9d1d9; max-height: 150px; overflow-y: auto; }
+        .prompt-section.collapsed pre,
+        .prompt-section.collapsed .msg-item,
+        .prompt-section.collapsed .tools-list { display: none; }
+        .prompt-section .msg-item { margin-bottom: 8px; padding: 6px 8px; background: #0d1117; border: 1px solid #1e2530; border-radius: 4px; }
+        .prompt-section .msg-role { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 3px; }
+        .prompt-section .msg-role.user { color: #56d364; }
+        .prompt-section .msg-role.assistant { color: #79c0ff; }
+        .prompt-section .msg-role.system { color: #d2a8ff; }
+        .prompt-section .msg-role.tool { color: #e8870a; }
+        .prompt-section .msg-role.tool_result { color: #e8870a; }
+        .prompt-section .msg-body { font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 80px; overflow-y: auto; }
+        .prompt-section .tools-list { display: flex; flex-wrap: wrap; gap: 4px; }
+        .prompt-section .tool-tag { background: #1a2030; border: 1px solid #2a3040; padding: 2px 8px; border-radius: 10px; font-size: 10px; color: #d2a8ff; }
+        .prompt-section.collapsed > pre { display: none; }
+        .prompt-section.collapsed > .tools-list { display: none; }
+        .prompt-section.collapsed > .msg-item { display: none; }
+
+        /* Right: Prompt Preview Panel */
+        .detail-panel { flex: 1; display: flex; flex-direction: column; min-width: 280px; background: #0a0e14; }
+        .detail-header { padding: 10px 14px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .detail-header h2 { font-size: 13px; color: #d2a8ff; font-weight: 600; }
+        .detail-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .detail-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 12px; line-height: 1.8; }
+        .detail-section { margin-bottom: 14px; }
+        .detail-section-title { font-size: 10px; color: #e8870a; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+        .detail-section pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #c9d1d9; max-height: 120px; overflow-y: auto; }
+        .detail-section .msg-item { margin-bottom: 6px; padding: 6px 8px; background: #0d1117; border: 1px solid #1e2530; border-radius: 4px; }
+        .detail-section .msg-role { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 3px; }
+        .detail-section .msg-role.user { color: #56d364; }
+        .detail-section .msg-role.assistant { color: #79c0ff; }
+        .detail-section .msg-role.system { color: #d2a8ff; }
+        .detail-section .msg-role.tool { color: #e8870a; }
+        .detail-section .msg-role.tool_result { color: #e8870a; }
+        .detail-section .msg-body { font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
+        .detail-section .tools-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+        .detail-section .tool-tag { background: #1a2030; border: 1px solid #2a3040; padding: 2px 8px; border-radius: 10px; font-size: 10px; color: #d2a8ff; }
+        .detail-section-title { cursor: pointer; user-select: none; }
+        .detail-section-title:hover { color: #e0c0ff; }
+        .detail-section .collapse-icon { font-size: 10px; margin-right: 4px; transition: transform 0.2s; display: inline-block; }
+        .detail-section.collapsed > pre,
+        .detail-section.collapsed > .tools-grid,
+        .detail-section.collapsed > .msg-item { display: none; }
+
+        /* Tool call block — expandable */
+        .tool-call-block { margin: 6px 0; border: 1px solid #1a3a5c; border-radius: 4px; overflow: hidden; }
+        .tool-call-header { display: flex; align-items: center; padding: 6px 10px; background: #0d1a2d; cursor: pointer; user-select: none; }
+        .tool-call-header:hover { background: #132238; }
+        .tool-call-name { font-size: 12px; font-weight: 600; color: #58a6ff; }
+        .tool-call-body { padding: 0; }
+        .tool-call-body.collapsed { display: none; }
+        .tool-call-body pre { margin: 0; padding: 8px 10px; background: #0d1117; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+
+        /* Tool result block — expandable */
+        .tool-result-block { margin: 6px 0; border: 1px solid #1a3a2c; border-radius: 4px; overflow: hidden; }
+        .tool-result-block.is-error { border-color: #5c1a1a; }
+        .tool-result-header { display: flex; align-items: center; padding: 6px 10px; background: #0d1a15; cursor: pointer; user-select: none; }
+        .tool-result-header:hover { background: #132820; }
+        .tool-result-block.is-error .tool-result-header { background: #1a0d0d; }
+        .tool-result-block.is-error .tool-result-header:hover { background: #281313; }
+        .tool-result-label { font-size: 12px; font-weight: 600; color: #3fb950; }
+        .tool-result-block.is-error .tool-result-label { color: #f85149; }
+        .tool-result-body { padding: 0; }
+        .tool-result-body.collapsed { display: none; }
+        .tool-result-body pre { margin: 0; padding: 8px 10px; background: #0d1117; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+
+        /* Flow empty state */
+        .flow-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 12px; line-height: 1.8; }
+
+        /* Iteration separator */
+        .iter-sep { text-align: center; padding: 4px 10px; margin: 4px 0; }
+        .iter-sep span { background: #2d1a3d; color: #d2a8ff; padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Claude Agent</h1>
+        <div class="tab-bar">
+            <a href="/agent" class="tab-btn active" onclick="highlightTab(this)">🤖 Agent</a>
+            <a href="/" class="tab-btn" onclick="highlightTab(this)">🖥️ 终端</a>
+        </div>
+        <div class="header-info">
+            <span>迭代: <span class="iter" id="iterCount">0</span></span>
+            <span>工具: <span class="tool" id="toolCount">0</span></span>
+            <span>事件: <span class="event" id="eventCount">0</span></span>
+        </div>
+    </div>
+
+    <div class="main">
+        <!-- Left: Chat -->
+        <div class="chat-panel">
+            <div class="chat-messages" id="chatMessages">
+                <div class="msg-empty">
+                    输入消息开始体验 Agent 执行流程。<br>
+                    左侧：对话记录<br>
+                    中间：执行流程时间线<br>
+                    右侧：当前 Prompt 组装详情
+                </div>
+            </div>
+            <div class="input-area">
+                <textarea class="input-box" id="userInput" placeholder="输入任务描述..." rows="1"></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+
+        <!-- Middle: Flow Timeline -->
+        <div class="flow-panel">
+            <div class="flow-header">
+                <h2>执行流程</h2>
+                <div class="flow-actions">
+                    <button class="btn-sm" onclick="clearFlow()">清空</button>
+                    <button class="btn-sm" id="autoScrollBtn" onclick="toggleAutoScroll()">自动滚动: 开</button>
+                </div>
+            </div>
+            <div class="flow-content" id="flowContent">
+                <div class="flow-empty">等待开始...</div>
+            </div>
+        </div>
+
+        <!-- Right: Prompt Detail -->
+        <div class="detail-panel">
+            <div class="detail-header">
+                <h2>Prompt 组装详情</h2>
+            </div>
+            <div class="detail-content" id="detailContent">
+                <div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab navigation
+        function highlightTab(btn) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        // ── State ──────────────────────────────────────
+        let iterCount = 0, toolCount = 0, eventCount = 0;
+        let autoScroll = true;
+        let selectedEvent = null;
+        let currentIterTexts = [];
+        let currentIterCard = null;
+        let isRunning = false;
+        const container = document.getElementById('chatMessages');
+        const flowContent = document.getElementById('flowContent');
+        const detailContent = document.getElementById('detailContent');
+
+        // ── Icons ───────────────────────────────────────
+        const ICONS = {
+            text: '💬', tool_call: '🔧', tool_result: '📝',
+            error: '❌', iteration_start: '▶', iteration_end: '⏹',
+            prompt_assembled: '📋', waiting: '⏳'
+        };
+
+        // ── Utilities ───────────────────────────────────
+        function esc(t) {
+            if (typeof t !== 'string') t = JSON.stringify(t);
+            return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollBtn').textContent = '自动滚动: ' + (autoScroll ? '开' : '关');
+            document.getElementById('autoScrollBtn').classList.toggle('active', autoScroll);
+        }
+        document.getElementById('autoScrollBtn').classList.add('active');
+
+        // ── Event: render flow card ────────────────────
+        function addFlowCard(event) {
+            const empty = flowContent.querySelector('.flow-empty');
+            if (empty) empty.remove();
+
+            const type = event.type;
+            const data = event.data || '';
+            const ts = event.timestamp || '';
+            const details = event.details || {};
+
+            // Text event: accumulate in current card
+            if (type === 'text' && currentIterCard) {
+                currentIterTexts.push(data);
+                const full = currentIterTexts.join('');
+                const preview = full.length > 80 ? full.slice(0,80) + '...' : full;
+                currentIterCard.querySelector('.event-preview').textContent = preview;
+                const body = currentIterCard.querySelector('.event-body');
+                body.innerHTML = `<pre>${esc(full)}</pre>`;
+                scrollFlow();
+                return;
+            }
+
+            // Reset text accumulation
+            if (type !== 'text') {
+                currentIterTexts = [];
+                currentIterCard = null;
+            }
+
+            // Iteration separator
+            if (type === 'iteration_start') {
+                iterCount++;
+                document.getElementById('iterCount').textContent = iterCount;
+                const sep = document.createElement('div');
+                sep.className = 'iter-sep';
+                sep.innerHTML = `<span>迭代 #${iterCount}</span>`;
+                flowContent.appendChild(sep);
+                currentIterTexts = [];
+                currentIterCard = null;
+                return;
+            }
+
+            if (type === 'iteration_end') {
+                currentIterTexts = [];
+                currentIterCard = null;
+                return;
+            }
+
+            if (type === 'tool_call') {
+                toolCount++;
+                document.getElementById('toolCount').textContent = toolCount;
+            }
+
+            eventCount++;
+            document.getElementById('eventCount').textContent = eventCount;
+
+            const icon = ICONS[type] || '📌';
+            const preview = buildPreview(type, data, details);
+
+            const card = document.createElement('div');
+            card.className = 'event-card';
+            if (type === 'text') {
+                currentIterTexts = [data];
+                currentIterCard = card;
+            }
+
+            card.innerHTML = `
+                <div class="event-header" onclick="toggleCard(this)">
+                    <div class="event-icon icon-${esc(type)}">${icon}</div>
+                    <div class="event-info">
+                        <div class="event-type">${esc(type)}</div>
+                        <div class="event-preview">${esc(preview)}</div>
+                    </div>
+                    <div class="event-time">${esc(ts)}</div>
+                    <div class="event-arrow">▶</div>
+                </div>
+                <div class="event-body">${buildBody(type, data, details)}</div>
+            `;
+
+            flowContent.appendChild(card);
+            scrollFlow();
+        }
+
+        function buildPreview(type, data, details) {
+            if (type === 'text') return '';
+            if (type === 'tool_call') {
+                const n = details.name || data?.name || '?';
+                return `🔧 ${n}`;
+            }
+            if (type === 'tool_result') {
+                const n = details.name || '';
+                const c = typeof (details.content || data) === 'string'
+                    ? (details.content || data).slice(0, 60) : JSON.stringify(details.content || data).slice(0, 60);
+                return `📝 ${n}: ${c}`;
+            }
+            if (type === 'prompt_assembled') {
+                const sysLen = (details.system_prompt || '').length;
+                const msgLen = (details.messages || []).length;
+                const toolLen = (details.tools || []).length;
+                return `📋 system(${sysLen}c) msgs(${msgLen}) tools(${toolLen})`;
+            }
+            if (type === 'error') return '❌ ' + (details.message || String(data)).slice(0, 60);
+            if (type === 'waiting') return '⏳ 等待响应...';
+            return String(data).slice(0, 60);
+        }
+
+        function buildBody(type, data, details) {
+            if (type === 'text') return `<pre>${esc(Array.isArray(data) ? data.join('') : data)}</pre>`;
+
+            if (type === 'tool_call') {
+                const name = details.name || data?.name || '?';
+                const inp = details.input || data?.input || {};
+                const inpStr = JSON.stringify(inp, null, 2);
+                return `<div class="tool-call-detail">
+                    <h4>工具名称</h4><pre>${esc(name)}</pre>
+                    <h4>输入参数</h4><pre>${esc(inpStr)}</pre>
+                </div>`;
+            }
+
+            if (type === 'tool_result') {
+                const name = details.name || '';
+                const content = details.content || data || '';
+                const isError = details.is_error || false;
+                const preview = typeof content === 'string'
+                    ? content
+                    : JSON.stringify(content, null, 2);
+                return `<div class="tool-call-detail">
+                    ${name ? `<h4>结果</h4>` : ''}
+                    <pre class="tool-result-body${isError?' error':''}" style="max-height:none">${esc(preview)}</pre>
+                </div>`;
+            }
+
+            if (type === 'prompt_assembled') {
+                return buildPromptBody(details, false);
+            }
+
+            return `<pre>${esc(typeof data === 'object' ? JSON.stringify(data, null, 2) : data)}</pre>`;
+        }
+
+        // ── Helper: simple message block ──────────────
+        function buildMsgItem(role, text) {
+            const roleClass = esc(role);
+            const preview = text.length > 500 ? esc(text.slice(0, 500)) + '...' : esc(text);
+            return `<div class="msg-item">
+                <div class="msg-role ${roleClass}">${esc(role)}</div>
+                <div class="msg-body">${preview}</div>
+            </div>`;
+        }
+
+        // ── Helper: expandable tool call block ─────────
+        function buildToolCallBlock(name, input, output) {
+            const id = 'tc_' + Math.random().toString(36).slice(2, 9);
+            const inputStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
+            return `<div class="tool-call-block">
+                <div class="tool-call-header" onclick="toggleToolBlock('${id}')">
+                    <span class="collapse-icon" id="${id}_icon">▶</span>
+                    <span class="tool-call-name">🔧 ${esc(name)}</span>
+                </div>
+                <div class="tool-call-body collapsed" id="${id}">
+                    <pre>${esc(inputStr)}</pre>
+                </div>
+            </div>`;
+        }
+
+        // ── Helper: expandable tool result block ───────
+        function buildToolResultBlock(content, isError) {
+            const id = 'tr_' + Math.random().toString(36).slice(2, 9);
+            const contentStr = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+            const preview = contentStr.length > 200 ? contentStr.slice(0, 200) + '...' : contentStr;
+            const label = isError ? '❌ Error' : '✅ Result';
+            return `<div class="tool-result-block ${isError ? 'is-error' : ''}">
+                <div class="tool-result-header" onclick="toggleToolBlock('${id}')">
+                    <span class="collapse-icon" id="${id}_icon">▶</span>
+                    <span class="tool-result-label">${label}</span>
+                </div>
+                <div class="tool-result-body collapsed" id="${id}">
+                    <pre>${esc(contentStr)}</pre>
+                </div>
+            </div>`;
+        }
+
+        function toggleToolBlock(id) {
+            const body = document.getElementById(id);
+            const icon = document.getElementById(id + '_icon');
+            if (body && icon) {
+                body.classList.toggle('collapsed');
+                icon.textContent = body.classList.contains('collapsed') ? '▶' : '▼';
+            }
+        }
+
+        function buildPromptBody(details, forDetailPanel) {
+            const sys = details.system_prompt || '';
+            const msgs = details.messages || [];
+            const tools = details.tools || [];
+            const systemReminders = details.system_reminders || [];
+
+            let html = `<div class="prompt-detail">`;
+
+            // System Prompt - COLLAPSED by default
+            html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
+                <div class="prompt-section-title"><span class="collapse-icon">▶</span>System Prompt <span style="color:#4a5568;font-weight:400">(${sys.length}c)</span></div>
+                <pre>${esc(sys || '(none)')}</pre>
+            </div>`;
+
+            // System Reminders - COLLAPSED by default (separate section)
+            if (systemReminders.length > 0) {
+                html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
+                    <div class="prompt-section-title"><span class="collapse-icon">▶</span>System Reminders (${systemReminders.length})</div>`;
+                for (const reminder of systemReminders) {
+                    html += `<div class="msg-item" style="border-color:#d2a8ff;">
+                        <div class="msg-role" style="color:#d2a8ff;">SYSTEM-REMINDER</div>
+                        <div class="msg-body">${esc(reminder.slice(0, 500) + (reminder.length > 500 ? '...' : ''))}</div>
+                    </div>`;
+                }
+                html += `</div>`;
+            }
+
+            // Messages
+            const msgSectionClass = msgs.length > 3 ? 'collapsed' : '';
+            html += `<div class="prompt-section ${msgSectionClass}" onclick="toggleSection(this)">
+                <div class="prompt-section-title"><span class="collapse-icon">▶</span>Messages (${msgs.length})</div>`;
+            if (msgs.length === 0) {
+                html += `<pre>(none)</pre>`;
+            } else {
+                for (const m of msgs) {
+                    const rawRole = m.role || 'unknown';
+                    const content = m.content_array || m.content;
+                    if (Array.isArray(content)) {
+                        for (const item of content) {
+                            if (item.type === 'system-reminder') {
+                                // Skip in messages — shown in System Reminders section above
+                                continue;
+                            }
+                            if (item.type === 'tool_use') {
+                                const toolInput = typeof item.input === 'string' ? item.input : JSON.stringify(item.input, null, 2);
+                                html += buildToolCallBlock(item.name, toolInput, null);
+                            } else if (item.type === 'tool_result') {
+                                const resultContent = typeof item.content === 'string' ? item.content : JSON.stringify(item.content, null, 2);
+                                html += buildToolResultBlock(resultContent, item.is_error);
+                            } else if (item.type === 'text') {
+                                html += buildMsgItem(rawRole, item.text || '');
+                            } else {
+                                html += buildMsgItem(rawRole, typeof item === 'string' ? item : JSON.stringify(item));
+                            }
+                        }
+                    } else {
+                        const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+                        html += buildMsgItem(rawRole, contentStr);
+                    }
+                }
+            }
+            html += `</div>`;
+
+            // Tools - COLLAPSED by default
+            html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
+                <div class="prompt-section-title"><span class="collapse-icon">▶</span>Tools (${tools.length})</div>`;
+            if (tools.length === 0) {
+                html += `<pre>(none)</pre>`;
+            } else {
+                html += `<div class="tools-list">`;
+                for (const t of tools) {
+                    const name = t.name || t.function?.name || '?';
+                    html += `<span class="tool-tag">${esc(name)}</span>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div></div>`;
+
+            return html;
+        }
+
+        function toggleSection(el) {
+            el.classList.toggle('collapsed');
+            const icon = el.querySelector('.collapse-icon');
+            if (icon) {
+                icon.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
+            }
+        }
+
+        function toggleCard(header) {
+            const card = header.parentElement;
+            const wasOpen = card.classList.contains('open');
+            // Close all
+            document.querySelectorAll('.event-card.open').forEach(c => c.classList.remove('open'));
+            if (!wasOpen) {
+                card.classList.add('open');
+                // Show in detail panel
+                const event = card._event;
+                if (event && event.type === 'prompt_assembled') {
+                    renderDetailPanel(event.details || {});
+                }
+            } else {
+                if (detailContent) {
+                    detailContent.innerHTML = `<div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>`;
+                }
+            }
+        }
+
+        // ── Right panel: Prompt detail ──────────────────
+        function renderDetailPanel(details) {
+            const sys = details.system_prompt || '';
+            const msgs = details.messages || [];
+            const tools = details.tools || [];
+            const systemReminders = details.system_reminders || [];
+
+            let html = '';
+
+            // System - COLLAPSED by default
+            html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
+                <div class="detail-section-title"><span class="collapse-icon">▶</span>System Prompt <span style="color:#4a5568;font-weight:400">(${sys.length}c)</span></div>
+                <pre>${esc(sys || '(none)')}</pre>
+            </div>`;
+
+            // System Reminders - COLLAPSED by default (separate section)
+            if (systemReminders.length > 0) {
+                html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
+                    <div class="detail-section-title"><span class="collapse-icon">▶</span>System Reminders (${systemReminders.length})</div>`;
+                for (const reminder of systemReminders) {
+                    html += `<div class="msg-item" style="border-color:#d2a8ff;">
+                        <div class="msg-role" style="color:#d2a8ff;">SYSTEM-REMINDER</div>
+                        <div class="msg-body">${esc(reminder.slice(0, 300) + (reminder.length > 300 ? '...' : ''))}</div>
+                    </div>`;
+                }
+                html += `</div>`;
+            }
+
+            // Messages - always expanded in detail panel for visibility
+            html += `<div class="detail-section">`;
+            html += `<div class="detail-section-title" style="cursor:default;">Messages (${msgs.length})</div>`;
+            if (msgs.length === 0) {
+                html += `<pre>(none)</pre>`;
+            } else {
+                for (const m of msgs.slice(-6)) {
+                    const rawRole = m.role || 'unknown';
+                    const content = m.content_array || m.content;
+                    if (Array.isArray(content)) {
+                        for (const item of content) {
+                            if (item.type === 'system-reminder') {
+                                continue;
+                            }
+                            if (item.type === 'tool_use') {
+                                const toolInput = typeof item.input === 'string' ? item.input : JSON.stringify(item.input, null, 2);
+                                html += buildToolCallBlock(item.name, toolInput, null);
+                            } else if (item.type === 'tool_result') {
+                                const resultContent = typeof item.content === 'string' ? item.content : JSON.stringify(item.content, null, 2);
+                                html += buildToolResultBlock(resultContent, item.is_error);
+                            } else if (item.type === 'text') {
+                                html += buildMsgItem(rawRole, item.text || '');
+                            } else {
+                                html += buildMsgItem(rawRole, typeof item === 'string' ? item : JSON.stringify(item));
+                            }
+                        }
+                    } else {
+                        const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+                        html += buildMsgItem(rawRole, contentStr);
+                    }
+                }
+                if (msgs.length > 6) {
+                    html += `<pre style="margin-top:6px;color:#4a5568">... (还有 ${msgs.length - 6} 条消息)</pre>`;
+                }
+            }
+            html += `</div>`;
+
+            // Tools - COLLAPSED by default
+            html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
+                <div class="detail-section-title"><span class="collapse-icon">▶</span>Tools (${tools.length})</div>`;
+            if (tools.length === 0) {
+                html += `<pre>(none)</pre>`;
+            } else {
+                html += `<div class="tools-grid">`;
+                for (const t of tools) {
+                    const name = t.name || t.function?.name || '?';
+                    html += `<span class="tool-tag">${esc(name)}</span>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+
+            detailContent.innerHTML = html;
+        }
+
+        function toggleDetailSection(el) {
+            el.classList.toggle('collapsed');
+            const icon = el.querySelector('.collapse-icon');
+            if (icon) {
+                icon.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
+            }
+        }
+
+        function scrollFlow() {
+            if (autoScroll) {
+                flowContent.scrollTop = flowContent.scrollHeight;
+            }
+        }
+
+        // ── Chat: add message ──────────────────────────
+        function addChat(role, content) {
+            const div = document.createElement('div');
+            div.className = `msg ${role}`;
+            const roleLabel = role === 'user' ? 'You' : 'Assistant';
+            div.innerHTML = `
+                <div class="role">${roleLabel}</div>
+                <pre>${esc(content)}</pre>
+                <div class="ts">${new Date().toLocaleTimeString()}</div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // ── Clear ──────────────────────────────────────
+        function clearFlow() {
+            flowContent.innerHTML = '<div class="flow-empty">等待开始...</div>';
+            iterCount = toolCount = eventCount = 0;
+            document.getElementById('iterCount').textContent = '0';
+            document.getElementById('toolCount').textContent = '0';
+            document.getElementById('eventCount').textContent = '0';
+            currentIterTexts = [];
+            currentIterCard = null;
+            detailContent.innerHTML = '<div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>';
+        }
+
+        // ── Send message ────────────────────────────────
+        document.getElementById('userInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        document.getElementById('userInput').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const text = input.value.trim();
+            if (!text || isRunning) return;
+
+            clearFlow();
+            input.value = '';
+            input.style.height = 'auto';
+            addChat('user', text);
+            isRunning = true;
+            sendBtn.disabled = true;
+
+            try {
+                const resp = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buf = '';
+                let textAcc = '';
+
+                while (true) {
+                    const { done, val } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(val, { stream: true });
+                    const lines = buf.split('\n');
+                    buf = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data:')) continue;
+                        const raw = line.slice(5).trim();
+                        if (!raw) continue;
+                        try {
+                            const evt = JSON.parse(raw);
+                            addFlowCard(evt);
+
+                            // Render assistant text to chat
+                            if (evt.type === 'text' && evt.data) {
+                                textAcc += evt.data;
+                            }
+                        } catch(e) {}
+                    }
+                }
+
+                // Show accumulated assistant text
+                if (textAcc) {
+                    addChat('assistant', textAcc);
+                }
+
+            } catch (e) {
+                addChat('assistant', '错误: ' + e.message);
+            } finally {
+                isRunning = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+    </script>
+</body>
+</html>

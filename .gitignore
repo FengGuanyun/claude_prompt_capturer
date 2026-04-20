@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+.claude/
+.env
+proxy_debug_logs.jsonl
+*.log
