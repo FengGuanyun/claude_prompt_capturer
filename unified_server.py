@@ -1,10 +1,11 @@
 """
-Unified Agent Demo Server — Port 80
-Combined: Agent Chat UI + Terminal UI + API Proxy + WebSocket PTY
+Unified Server — Terminal UI + API Proxy + WebSocket PTY
+No agent chat — agent code is in server.py (local demo)
 """
 
 import json
 import os
+import re
 import pty
 import subprocess
 import asyncio
@@ -14,10 +15,6 @@ from flask import Flask, request, Response, stream_with_context, send_from_direc
 from flask_cors import CORS
 from datetime import datetime
 import httpx
-
-from agent.engine import AgentEngine, get_team, create_specialized_team
-from agent.tools_registry import get_all_tools
-from agent.engine import SkillTool
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -52,64 +49,12 @@ def estimate_tokens(text: str) -> int:
     return chinese // 2 + other // 4
 
 
-# ─── Agent Engine ───
-
-_engine: AgentEngine | None = None
-
-SYSTEM_PROMPT = """You are an expert full-stack developer agent with a React tool loop.
-
-## Capabilities
-- **React Tool Loop**: Think → Act → Observe cycles until the task is complete
-- **Tool Use**: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, TaskCreate/Update/List, Skill, ToolSearch
-- **Memory**: You have a 3-layer memory system (short-term recent messages, mid-term summaries, long-term project context)
-- **Compression**: Long sessions are automatically summarized
-- **Agent Team**: You can delegate subtasks by using `Skill` with `$frontend-dev`, `$backend-dev`, or `$tester`
-
-## Web App Creation Rules
-When asked to create a web app:
-1. Plan the structure first
-2. Write COMPLETE, working files using the Write tool
-3. Save to `apps/` directory under a subdirectory named after the app
-4. Use proper file extensions (.html, .css, .js, .py)
-5. Verify files exist with Bash (ls, cat)
-6. Tell the user the URL: `http://localhost/apps/{app_name}/`
-
-## Important
-- Write COMPLETE code — no truncation, no placeholders
-- Do NOT describe what you will do — just create the files
-- After creating files, verify them"""
-
-
-def get_engine() -> AgentEngine:
-    global _engine
-    if _engine is None:
-        config = load_claude_config()
-        _engine = AgentEngine(
-            system_prompt=SYSTEM_PROMPT,
-            model=config["model"],
-            api_key=config["api_key"],
-            base_url=config["base_url"],
-            max_tokens_before_compact=6000,
-        )
-    return _engine
-
-
-event_logs: list[dict] = []
-MAX_LOGS = 200
-
-
-def log_event(event):
-    d = event.to_dict()
-    event_logs.append(d)
-    if len(event_logs) > MAX_LOGS:
-        event_logs.pop(0)
-
-
-# ─── Captured Prompts (proxy) ───
+# ─── Captured Prompts ───
 
 captured_requests: list[dict] = []
 
 # ─── Debug Logs ───
+
 DEBUG_LOG_FILE = Path(__file__).parent / "proxy_debug_logs.jsonl"
 
 def write_debug_log(entry: dict):
@@ -131,6 +76,11 @@ def read_debug_logs(limit: int = 50) -> list:
     return lines[-limit:]
 
 
+def filter_haiku_lines(text):
+    lines = text.split('\n')
+    return '\n'.join(line for line in lines if 'claude-haiku-4-5-20251001' not in line)
+
+
 # ─── HTML Routes ───
 
 @app.route("/")
@@ -141,11 +91,6 @@ def index():
 @app.route("/terminal")
 def terminal_page():
     return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
-
-
-@app.route("/agent")
-def agent_page():
-    return (Path(__file__).parent / "agent_ui.html").read_text(), 200, {"Content-Type": "text/html"}
 
 
 @app.route("/ui")
@@ -163,73 +108,11 @@ def serve_app(filename):
     return send_from_directory(APPS_DIR, filename)
 
 
-# ─── Agent Chat API ───
-
-@app.route("/chat", methods=["POST"])
-def chat():
-    data = request.json
-    messages = data.get("messages", [])
-    user_input = messages[-1].get("content", "") if messages else data.get("message", "")
-
-    engine = get_engine()
-
-    def generate():
-        for event in engine.run(user_input):
-            log_event(event)
-            yield f"event: {event.type}\ndata: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@app.route("/reset", methods=["POST"])
-def reset_engine():
-    global _engine
-    _engine = None
-    event_logs.clear()
-    return {"status": "ok"}
-
-
-@app.route("/logs", methods=["GET"])
-def get_logs():
-    return {"logs": event_logs, "count": len(event_logs)}
-
-
-@app.route("/clear_logs", methods=["POST"])
-def clear_logs_route():
-    event_logs.clear()
-    return {"status": "ok"}
-
-
 # ─── Info API ───
 
 @app.route("/health", methods=["GET"])
 def health():
     return {"status": "ok"}
-
-
-@app.route("/skills", methods=["GET"])
-def list_skills():
-    tool = SkillTool()
-    skills = tool._discover_skills()
-    return {"skills": skills, "count": len(skills)}
-
-
-@app.route("/tools", methods=["GET"])
-def list_tools():
-    tools = get_all_tools()
-    return {
-        "tools": [{"name": t.name, "description": t.description, "read_only": t.is_read_only()} for t in tools.values()],
-        "count": len(tools),
-    }
-
-
-@app.route("/team", methods=["GET"])
-def team_status():
-    return get_team().get_team_status()
 
 
 @app.route("/apps", methods=["GET"])
@@ -338,12 +221,6 @@ Chinese translation:"""
         return {"error": str(e)}, 500
 
 
-def filter_haiku_lines(text):
-    """Remove claude-haiku-4-5-20251001 reference lines from text."""
-    lines = text.split('\n')
-    return '\n'.join(line for line in lines if 'claude-haiku-4-5-20251001' not in line)
-
-
 @app.route("/v1/messages", methods=["POST"])
 def proxy_api():
     try:
@@ -367,14 +244,11 @@ def proxy_api():
                         if b.get("type") == "text":
                             text = b.get("text", "")
                             if text and "<system-reminder>" in text:
-                                import re
-                                # Extract ALL system-reminders
                                 for m in re.finditer(r'<system-reminder>(.*?)</system-reminder>', text, re.DOTALL):
                                     reminder_content = filter_haiku_lines(m.group(1).strip())
                                     system_reminders.append(reminder_content)
                                     content_array.append({"type": "system-reminder", "text": reminder_content})
                                     text_parts.append(f"[SYSTEM REMINDER] {reminder_content}")
-                                # Preserve any text outside the reminder tags
                                 outer_text = filter_haiku_lines(re.sub(r'<system-reminder>.*?</system-reminder>', '', text, flags=re.DOTALL).strip())
                                 if outer_text:
                                     text_parts.append(outer_text)
@@ -465,7 +339,6 @@ def proxy_api():
         if len(captured_requests) > 500:
             captured_requests.pop(0)
 
-        # Write debug log (raw request + parsed result)
         debug_entry = {
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
             "raw_request": req_data,
@@ -491,18 +364,17 @@ def proxy_api():
         try:
             resp = httpx.post(target_url, content=body, headers=headers, timeout=120)
             ct = resp.headers.get("content-type", "")
-            content = resp.content
+            content_data = resp.content
             resp.close()
-            # Log response status
             debug_entry["response_status"] = resp.status_code
             debug_entry["response_content_type"] = ct
-            debug_entry["response_preview"] = content[:500].decode("utf-8", errors="replace") if not b"text/event-stream" in ct.encode() else "(streaming)"
-            write_debug_log(debug_entry)  # append response info
+            debug_entry["response_preview"] = content_data[:500].decode("utf-8", errors="replace") if not b"text/event-stream" in ct.encode() else "(streaming)"
+            write_debug_log(debug_entry)
 
             if "text/event-stream" in ct:
-                return Response(content, mimetype="text/event-stream")
+                return Response(content_data, mimetype="text/event-stream")
             else:
-                return Response(f"data: {content.decode('utf-8')}\n\n",
+                return Response(f"data: {content_data.decode('utf-8')}\n\n",
                                mimetype="text/event-stream")
         except Exception as e:
             debug_entry["error"] = str(e)
@@ -528,7 +400,7 @@ def proxy_api_get():
         return {"error": str(e)}, 500
 
 
-# ─── WebSocket PTY (separate thread) ───
+# ─── WebSocket PTY ───
 
 pty_procs = {}
 
@@ -642,11 +514,10 @@ if __name__ == "__main__":
     ws_thread.start()
 
     print("=" * 50)
-    print("Unified Agent Server — Port 80")
+    print("Unified Server — Port 8080")
     print("=" * 50)
     print()
     print("Home (Terminal):  http://localhost:8080")
-    print("Agent UI:         http://localhost:8080/agent")
     print("WebSocket PTY:    ws://localhost:8081")
     print()
     print("=" * 50)
