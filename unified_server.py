@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import asyncio
+import tempfile
 import threading
 import platform
 from pathlib import Path
@@ -472,10 +473,29 @@ def start_ws_handler(flask_app):
                     pty_inst = PTY(rows=24, cols=80)
 
                     if tool == "opencode":
-                        # opencode reads config from ~/.config/opencode/opencode.json
-                        # Set proxy env var to route through our server
-                        env_str = f"OPENCODE_PROXY=http://localhost:8080"
-                        cmdline = f'cmd /c set {env_str} && opencode'
+                        # Create temp opencode config for proxy routing
+                        config_fd, opencode_config_path = tempfile.mkstemp(
+                            suffix='.json', prefix='opencode_'
+                        )
+                        opencode_config = {
+                            "$schema": "https://opencode.ai/config.json",
+                            "provider": {
+                                "anthropic": {
+                                    "name": "Anthropic",
+                                    "options": {
+                                        "apiKey": config["api_key"],
+                                        "baseURL": "http://localhost:8080/v1"
+                                    }
+                                }
+                            },
+                            "model": {
+                                f"anthropic/{config['model']}": "*"
+                            }
+                        }
+                        os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
+                        os.close(config_fd)
+                        os.environ["OPENCODE_CONFIG"] = opencode_config_path
+                        cmd = "opencode"
                     else:
                         # claude: use temp settings file with proxy config
                         proxy_settings = {
@@ -485,13 +505,12 @@ def start_ws_handler(flask_app):
                                 "ANTHROPIC_MODEL": config["model"]
                             }
                         }
-                        import tempfile
                         settings_fd, settings_path = tempfile.mkstemp(suffix='.json')
                         os.write(settings_fd, json.dumps(proxy_settings, indent=2).encode())
                         os.close(settings_fd)
-                        cmdline = f'cmd /c claude --settings {settings_path}'
+                        cmd = f'claude --settings "{settings_path}"'
 
-                    pty_inst.spawn("C:\\Windows\\System32\\cmd.exe", cmdline=cmdline)
+                    pty_inst.spawn("C:\\Windows\\System32\\cmd.exe", cmdline=f'cmd /c {cmd}')
 
                     import queue
                     q = queue.Queue()
@@ -536,8 +555,45 @@ def start_ws_handler(flask_app):
                     env = os.environ.copy()
                     env["TERM"] = "xterm-256color"
 
+                    if tool == "opencode":
+                        config_fd, opencode_config_path = tempfile.mkstemp(
+                            suffix='.json', prefix='opencode_'
+                        )
+                        opencode_config = {
+                            "$schema": "https://opencode.ai/config.json",
+                            "provider": {
+                                "anthropic": {
+                                    "name": "Anthropic",
+                                    "options": {
+                                        "apiKey": config["api_key"],
+                                        "baseURL": "http://localhost:8080/v1"
+                                    }
+                                }
+                            },
+                            "model": {
+                                f"anthropic/{config['model']}": "*"
+                            }
+                        }
+                        os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
+                        os.close(config_fd)
+                        env["OPENCODE_CONFIG"] = opencode_config_path
+                        cmd = ["opencode"]
+                        settings_path = opencode_config_path
+                    else:
+                        proxy_settings = {
+                            "env": {
+                                "ANTHROPIC_AUTH_TOKEN": config["api_key"],
+                                "ANTHROPIC_BASE_URL": "http://localhost:8080",
+                                "ANTHROPIC_MODEL": config["model"]
+                            }
+                        }
+                        settings_fd, settings_path = tempfile.mkstemp(suffix='.json')
+                        os.write(settings_fd, json.dumps(proxy_settings, indent=2).encode())
+                        os.close(settings_fd)
+                        cmd = ["claude", "--settings", settings_path]
+
                     proc = subprocess.Popen(
-                        ["claude", "--settings", settings_path],
+                        cmd,
                         stdin=slave_fd,
                         stdout=slave_fd,
                         stderr=slave_fd,
@@ -587,17 +643,22 @@ def start_ws_handler(flask_app):
                 import traceback
                 traceback.print_exc()
             finally:
-                if 'settings_path' in dir():
+                if 'opencode_config_path' in locals():
+                    try:
+                        os.unlink(opencode_config_path)
+                    except Exception:
+                        pass
+                if 'settings_path' in locals():
                     try:
                         os.unlink(settings_path)
                     except Exception:
                         pass
-                if IS_WINDOWS and 'pty_inst' in dir():
+                if IS_WINDOWS and 'pty_inst' in locals():
                     try:
                         pty_inst.close()
                     except Exception:
                         pass
-                else:
+                elif not IS_WINDOWS:
                     if proc:
                         try:
                             proc.terminate()
