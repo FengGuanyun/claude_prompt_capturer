@@ -6,21 +6,29 @@ No agent chat — agent code is in server.py (local demo)
 import json
 import os
 import re
-import pty
 import subprocess
 import asyncio
 import threading
+import platform
 from pathlib import Path
 from flask import Flask, request, Response, stream_with_context, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
 import httpx
 
+IS_WINDOWS = platform.system() == "Windows"
+
+if not IS_WINDOWS:
+    import pty
+
 app = Flask(__name__, static_folder=None)
 CORS(app)
 
 APPS_DIR = Path(__file__).parent / "apps"
 APPS_DIR.mkdir(exist_ok=True)
+
+# ─── WebSocket handler ───
+ws_handler = None
 
 # ─── Config ───
 
@@ -85,27 +93,32 @@ def filter_haiku_lines(text):
 
 @app.route("/")
 def index():
-    return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+    resp = Response((Path(__file__).parent / "terminal_ui.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return resp
 
 
 @app.route("/terminal")
 def terminal_page():
-    return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+    resp = Response((Path(__file__).parent / "terminal_ui.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return resp
 
 
 @app.route("/ui")
 def ui():
-    return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+    resp = Response((Path(__file__).parent / "terminal_ui.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return resp
 
 
 @app.route("/capture")
 def capture():
-    return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+    resp = Response((Path(__file__).parent / "terminal_ui.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return resp
 
 
 @app.route("/agent")
 def agent_page():
-    return (Path(__file__).parent / "agent_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+    resp = Response((Path(__file__).parent / "agent_ui.html").read_text(encoding="utf-8"), 200, {"Content-Type": "text/html", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return resp
 
 
 @app.route("/apps/<path:filename>")
@@ -113,121 +126,16 @@ def serve_app(filename):
     return send_from_directory(APPS_DIR, filename)
 
 
-# ─── Info API ───
+# ─── OpenCode Proxy ───
 
-@app.route("/health", methods=["GET"])
-def health():
-    return {"status": "ok"}
-
-
-@app.route("/apps", methods=["GET"])
-def list_apps():
-    apps = []
-    if APPS_DIR.exists():
-        for item in sorted(APPS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if item.is_dir():
-                apps.append({"name": item.name, "path": f"/apps/{item.name}/", "files": [f.name for f in item.iterdir() if f.is_file()]})
-            elif item.is_file() and item.suffix == ".html":
-                apps.append({"name": item.stem, "path": f"/apps/{item.name}", "files": [item.name]})
-    return {"apps": apps, "count": len(apps)}
+@app.route("/apps/anthropic/v1/messages", methods=["POST"])
+def opencode_proxy():
+    """Proxy for opencode (uses Anthropic-compatible API via DashScope)."""
+    return _proxy_to_api(base_url_path="apps/anthropic/v1/messages")
 
 
-# ─── Proxy / Capture API ───
-
-@app.route("/api_key", methods=["GET"])
-def get_api_key():
-    return load_claude_config()
-
-
-@app.route("/captured", methods=["GET"])
-def get_captured():
-    return {"requests": captured_requests, "count": len(captured_requests)}
-
-
-@app.route("/captured/<int:index>", methods=["GET"])
-def get_captured_detail(index: int):
-    if 0 <= index < len(captured_requests):
-        return captured_requests[index]
-    return {"error": "Not found"}, 404
-
-
-@app.route("/captured", methods=["DELETE"])
-def clear_captured():
-    captured_requests.clear()
-    return {"status": "ok"}
-
-
-@app.route("/debug_logs", methods=["GET"])
-def get_debug_logs():
-    limit = request.args.get("limit", 50, type=int)
-    logs = read_debug_logs(limit)
-    return {"logs": logs, "count": len(logs), "log_file": str(DEBUG_LOG_FILE)}
-
-
-@app.route("/debug_logs", methods=["DELETE"])
-def clear_debug_logs():
-    if DEBUG_LOG_FILE.exists():
-        DEBUG_LOG_FILE.unlink()
-    return {"status": "ok"}
-
-
-@app.route("/translate", methods=["POST"])
-def translate_text():
-    try:
-        data = request.get_json()
-        text = data.get("text", "").strip()
-        if not text:
-            return {"error": "No text provided"}, 400
-
-        config = load_claude_config()
-        target_url = f"{config['base_url']}/v1/messages"
-
-        prompt = f"""Translate the following English text to Chinese.
-
-RULES:
-- Translate natural language sentences into natural Chinese
-- Keep all tool names, function names, variable names, code snippets, file paths, URLs, flags, and technical terms in English
-- Keep placeholder patterns like {{...}}, [...], <...> in their original form
-- Keep ALL uppercase English words (abbreviations, proper nouns) as-is
-- Do NOT translate anything that looks like a technical identifier
-
-Original text:
-{text}
-
-Chinese translation:"""
-
-        req_body = {
-            "model": config["model"],
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": config["api_key"],
-            "anthropic-version": "2023-06-01",
-        }
-
-        resp = httpx.post(target_url, json=req_body, headers=headers, timeout=30)
-        if resp.status_code != 200:
-            return {"error": f"API error: {resp.status_code}"}, resp.status_code
-
-        result = resp.json()
-        content = result.get("content", [])
-        translation = ""
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                translation = block.get("text", "")
-                break
-
-        translation = translation.replace("Chinese translation:", "").strip()
-        return {"translation": translation}
-    except Exception as e:
-        return {"error": str(e)}, 500
-
-
-@app.route("/v1/messages", methods=["POST"])
-def proxy_api():
+def _proxy_to_api(base_url_path=None):
+    """Core proxy logic used by both Claude and opencode."""
     try:
         req_data = request.get_json()
         body = json.dumps(req_data)
@@ -348,11 +256,16 @@ def proxy_api():
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
             "raw_request": req_data,
             "parsed_entry": entry,
+            "proxy": "opencode" if base_url_path else "claude",
         }
         write_debug_log(debug_entry)
 
         config = load_claude_config()
-        target_url = f"{config['base_url']}/v1/messages"
+        if base_url_path:
+            # opencode: forward to dashscope directly
+            target_url = f"https://coding.dashscope.aliyuncs.com/{base_url_path}"
+        else:
+            target_url = f"{config['base_url']}/v1/messages"
         api_key = config["api_key"]
 
         headers = {
@@ -389,6 +302,129 @@ def proxy_api():
     except Exception as e:
         return {"error": str(e)}, 500
 
+@app.route("/health", methods=["GET"])
+def health():
+    return {"status": "ok"}
+
+
+@app.route("/apps", methods=["GET"])
+def list_apps():
+    apps = []
+    if APPS_DIR.exists():
+        for item in sorted(APPS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if item.is_dir():
+                apps.append({"name": item.name, "path": f"/apps/{item.name}/", "files": [f.name for f in item.iterdir() if f.is_file()]})
+            elif item.is_file() and item.suffix == ".html":
+                apps.append({"name": item.stem, "path": f"/apps/{item.name}", "files": [item.name]})
+    return {"apps": apps, "count": len(apps)}
+
+
+# ─── Proxy / Capture API ───
+
+@app.route("/api_key", methods=["GET"])
+def get_api_key():
+    return load_claude_config()
+
+
+@app.route("/tools", methods=["GET"])
+def get_tools():
+    return {
+        "available": ["claude", "opencode"],
+        "default": "claude"
+    }
+
+
+@app.route("/captured", methods=["GET"])
+def get_captured():
+    return {"requests": captured_requests, "count": len(captured_requests)}
+
+
+@app.route("/captured/<int:index>", methods=["GET"])
+def get_captured_detail(index: int):
+    if 0 <= index < len(captured_requests):
+        return captured_requests[index]
+    return {"error": "Not found"}, 404
+
+
+@app.route("/captured", methods=["DELETE"])
+def clear_captured():
+    captured_requests.clear()
+    return {"status": "ok"}
+
+
+@app.route("/debug_logs", methods=["GET"])
+def get_debug_logs():
+    limit = request.args.get("limit", 50, type=int)
+    logs = read_debug_logs(limit)
+    return {"logs": logs, "count": len(logs), "log_file": str(DEBUG_LOG_FILE)}
+
+
+@app.route("/debug_logs", methods=["DELETE"])
+def clear_debug_logs():
+    if DEBUG_LOG_FILE.exists():
+        DEBUG_LOG_FILE.unlink()
+    return {"status": "ok"}
+
+
+@app.route("/translate", methods=["POST"])
+def translate_text():
+    try:
+        data = request.get_json()
+        text = data.get("text", "").strip()
+        if not text:
+            return {"error": "No text provided"}, 400
+
+        config = load_claude_config()
+        target_url = f"{config['base_url']}/v1/messages"
+
+        prompt = f"""Translate the following English text to Chinese.
+
+RULES:
+- Translate natural language sentences into natural Chinese
+- Keep all tool names, function names, variable names, code snippets, file paths, URLs, flags, and technical terms in English
+- Keep placeholder patterns like {{...}}, [...], <...> in their original form
+- Keep ALL uppercase English words (abbreviations, proper nouns) as-is
+- Do NOT translate anything that looks like a technical identifier
+
+Original text:
+{text}
+
+Chinese translation:"""
+
+        req_body = {
+            "model": config["model"],
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": config["api_key"],
+            "anthropic-version": "2023-06-01",
+        }
+
+        resp = httpx.post(target_url, json=req_body, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            return {"error": f"API error: {resp.status_code}"}, resp.status_code
+
+        result = resp.json()
+        content = result.get("content", [])
+        translation = ""
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                translation = block.get("text", "")
+                break
+
+        translation = translation.replace("Chinese translation:", "").strip()
+        return {"translation": translation}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+@app.route("/v1/messages", methods=["POST"])
+def proxy_api():
+    return _proxy_to_api()
+
 
 @app.route("/v1/messages", methods=["GET"])
 def proxy_api_get():
@@ -405,125 +441,197 @@ def proxy_api_get():
         return {"error": str(e)}, 500
 
 
-# ─── WebSocket PTY ───
+# ─── WebSocket PTY (integrated on same port) ───
 
 pty_procs = {}
 
-def run_ws():
+if IS_WINDOWS:
+    from winpty import PTY
+
+def start_ws_handler(flask_app):
+    """Start WebSocket handler via async websockets server."""
     import websockets
+    import socket
 
-    async def pty_handler(websocket):
-        proc_id = id(websocket)
-        master_fd = None
-        proc = None
-        settings_path = None
+    ws_port = 8081
 
-        try:
-            master_fd, slave_fd = pty.openpty()
-            env = os.environ.copy()
-            env["TERM"] = "xterm-256color"
+    def ws_thread_func():
+        async def pty_handler(websocket):
+            # Parse tool from query string: ?tool=claude or ?tool=opencode
+            from urllib.parse import parse_qs, urlparse
+            path = websocket.request.path if hasattr(websocket, 'request') else ''
+            qs = parse_qs(urlparse(path).query)
+            tool = qs.get('tool', ['claude'])[0]
 
-            config = load_claude_config()
-            proxy_settings = {
-                "env": {
-                    "ANTHROPIC_AUTH_TOKEN": config["api_key"],
-                    "ANTHROPIC_BASE_URL": "http://localhost:8080",
-                    "ANTHROPIC_MODEL": config["model"]
-                }
-            }
-            import tempfile
-            settings_fd, settings_path = tempfile.mkstemp(suffix='.json')
-            os.write(settings_fd, json.dumps(proxy_settings, indent=2).encode())
-            os.close(settings_fd)
+            proc_id = id(websocket)
 
-            proc = subprocess.Popen(
-                ["claude", "--settings", settings_path],
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                env=env,
-                preexec_fn=os.setsid
-            )
+            try:
+                config = load_claude_config()
 
-            os.close(slave_fd)
-            pty_procs[proc_id] = (master_fd, proc)
-            loop = asyncio.get_event_loop()
-            q = asyncio.Queue()
+                if IS_WINDOWS:
+                    pty_inst = PTY(rows=24, cols=80)
 
-            def reader_callback():
-                try:
-                    data = os.read(master_fd, 1024)
-                    q.put_nowait(data if data else None)
-                except Exception:
-                    q.put_nowait(None)
+                    if tool == "opencode":
+                        # opencode reads config from ~/.config/opencode/opencode.json
+                        # Set proxy env var to route through our server
+                        env_str = f"OPENCODE_PROXY=http://localhost:8080"
+                        cmdline = f'cmd /c set {env_str} && opencode'
+                    else:
+                        # claude: use temp settings file with proxy config
+                        proxy_settings = {
+                            "env": {
+                                "ANTHROPIC_AUTH_TOKEN": config["api_key"],
+                                "ANTHROPIC_BASE_URL": "http://localhost:8080",
+                                "ANTHROPIC_MODEL": config["model"]
+                            }
+                        }
+                        import tempfile
+                        settings_fd, settings_path = tempfile.mkstemp(suffix='.json')
+                        os.write(settings_fd, json.dumps(proxy_settings, indent=2).encode())
+                        os.close(settings_fd)
+                        cmdline = f'cmd /c claude --settings {settings_path}'
 
-            loop.add_reader(master_fd, reader_callback)
+                    pty_inst.spawn("C:\\Windows\\System32\\cmd.exe", cmdline=cmdline)
 
-            async def process_output():
-                while True:
+                    import queue
+                    q = queue.Queue()
+
+                    def read_pty():
+                        while True:
+                            try:
+                                data = pty_inst.read()
+                                if data:
+                                    q.put(data)
+                                else:
+                                    import time
+                                    time.sleep(0.05)
+                            except Exception:
+                                q.put(None)
+                                break
+
+                    read_thread = threading.Thread(target=read_pty, daemon=True)
+                    read_thread.start()
+
+                    async def process_output():
+                        loop = asyncio.get_event_loop()
+                        while True:
+                            data = await loop.run_in_executor(None, q.get)
+                            if data is None:
+                                break
+                            try:
+                                await websocket.send(data)
+                            except Exception:
+                                break
+
+                    async def write_input():
+                        try:
+                            async for msg in websocket:
+                                pty_inst.write(msg)
+                        except Exception:
+                            pass
+
+                    await asyncio.gather(process_output(), write_input())
+                else:
+                    master_fd, slave_fd = pty.openpty()
+                    env = os.environ.copy()
+                    env["TERM"] = "xterm-256color"
+
+                    proc = subprocess.Popen(
+                        ["claude", "--settings", settings_path],
+                        stdin=slave_fd,
+                        stdout=slave_fd,
+                        stderr=slave_fd,
+                        env=env,
+                        preexec_fn=os.setsid
+                    )
+
+                    os.close(slave_fd)
+                    pty_procs[proc_id] = (master_fd, proc)
+
+                    q = asyncio.Queue()
+
+                    def reader_callback():
+                        try:
+                            data = os.read(master_fd, 1024)
+                            q.put_nowait(data if data else None)
+                        except Exception:
+                            q.put_nowait(None)
+
+                    loop = asyncio.get_event_loop()
+                    loop.add_reader(master_fd, reader_callback)
+
+                    async def process_output():
+                        while True:
+                            try:
+                                data = await asyncio.wait_for(q.get(), timeout=0.1)
+                                if data is None:
+                                    break
+                                await websocket.send(data.decode('utf-8', errors='replace'))
+                            except asyncio.TimeoutError:
+                                if proc.poll() is not None:
+                                    break
+                                continue
+
+                    async def write_input():
+                        try:
+                            async for msg in websocket:
+                                if master_fd is not None:
+                                    os.write(master_fd, msg.encode('utf-8'))
+                        except Exception:
+                            pass
+
+                    await asyncio.gather(process_output(), write_input())
+
+            except Exception as e:
+                print(f"PTY error: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                if 'settings_path' in dir():
                     try:
-                        data = await asyncio.wait_for(q.get(), timeout=0.1)
-                        if data is None:
-                            break
-                        await websocket.send(data.decode('utf-8', errors='replace'))
-                    except asyncio.TimeoutError:
-                        if proc.poll() is not None:
-                            break
-                        continue
+                        os.unlink(settings_path)
+                    except Exception:
+                        pass
+                if IS_WINDOWS and 'pty_inst' in dir():
+                    try:
+                        pty_inst.close()
+                    except Exception:
+                        pass
+                else:
+                    if proc:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                    if master_fd is not None:
+                        try:
+                            os.close(master_fd)
+                        except Exception:
+                            pass
+                pty_procs.pop(proc_id, None)
 
-            async def write_input():
-                try:
-                    async for msg in websocket:
-                        if master_fd is not None:
-                            os.write(master_fd, msg.encode('utf-8'))
-                except Exception:
-                    pass
+        async def main_server():
+            async with websockets.serve(pty_handler, "0.0.0.0", ws_port):
+                await asyncio.Future()
 
-            await asyncio.gather(process_output(), write_input())
+        asyncio.run(main_server())
 
-        except Exception as e:
-            print(f"PTY error: {e}")
-        finally:
-            if settings_path:
-                try:
-                    os.unlink(settings_path)
-                except Exception:
-                    pass
-            if proc:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-            if master_fd is not None:
-                try:
-                    loop.remove_reader(master_fd)
-                except Exception:
-                    pass
-                try:
-                    os.close(master_fd)
-                except Exception:
-                    pass
-            pty_procs.pop(proc_id, None)
-
-    async def ws_server():
-        async with websockets.serve(pty_handler, "0.0.0.0", 8081):
-            await asyncio.Future()
-
-    asyncio.run(ws_server())
+    t = threading.Thread(target=ws_thread_func, daemon=True)
+    t.start()
+    return ws_port
 
 
 # ─── Main ───
 
 if __name__ == "__main__":
-    ws_thread = threading.Thread(target=run_ws, daemon=True)
-    ws_thread.start()
+    ws_port = start_ws_handler(app)
 
     print("=" * 50)
     print("Unified Server — Port 8080")
     print("=" * 50)
     print()
     print("Home (Terminal):  http://localhost:8080")
-    print("WebSocket PTY:    ws://localhost:8081")
+    print(f"WebSocket PTY:    ws://localhost:{ws_port}")
     print()
     print("=" * 50)
 

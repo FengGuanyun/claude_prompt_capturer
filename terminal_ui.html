@@ -94,6 +94,10 @@
     <div class="header">
         <h1>Claude Terminal</h1>
         <div class="header-info" id="modelInfo">Loading...</div>
+        <select id="toolSelector" style="margin-left: 15px; background: #1a2030; color: #c9d1d9; border: 1px solid #2a3040; border-radius: 4px; padding: 3px 8px; font-size: 13px; cursor: pointer;" title="Select AI tool">
+            <option value="claude">Claude Code</option>
+            <option value="opencode">OpenCode</option>
+        </select>
     </div>
 
     <div class="main">
@@ -123,6 +127,25 @@
         // Load config
         fetch('/api_key').then(r => r.json()).then(cfg => {
             document.getElementById('modelInfo').textContent = cfg.model + ' @ ' + new URL(cfg.base_url).hostname;
+        });
+
+        // Load available tools
+        fetch('/tools').then(r => r.json()).then(data => {
+            const sel = document.getElementById('toolSelector');
+            sel.innerHTML = '';
+            data.available.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = t === 'claude' ? 'Claude Code' : 'OpenCode';
+                if (t === data.default) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        });
+
+        // Tool selector: reconnect on change
+        document.getElementById('toolSelector').addEventListener('change', () => {
+            if (ws) ws.close();
+            connect();
         });
 
         function initTerminal() {
@@ -156,8 +179,9 @@
 
         function connect() {
             const sid = getSessionId();
-            const wsProto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const wsUrl = wsProto + window.location.host + '/ws' + (sid ? '?session_id=' + sid : '');
+            const tool = document.getElementById('toolSelector').value || 'claude';
+            // Connect to the WebSocket PTY server on port 8081
+            const wsUrl = `ws://localhost:8081/ws?tool=${tool}` + (sid ? '&session_id=' + sid : '');
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
