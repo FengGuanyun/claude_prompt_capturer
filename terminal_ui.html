@@ -93,11 +93,11 @@
 <body>
     <div class="header">
         <h1>Claude Terminal</h1>
-        <div class="header-info" id="modelInfo">Loading...</div>
-        <select id="toolSelector" style="margin-left: 15px; background: #1a2030; color: #c9d1d9; border: 1px solid #2a3040; border-radius: 4px; padding: 3px 8px; font-size: 13px; cursor: pointer;" title="Select AI tool">
+        <select id="toolSelector" style="margin-left: auto; margin-right: 10px; background: #2a4a20; color: #56d364; border: 2px solid #56d364; border-radius: 6px; padding: 4px 12px; font-size: 13px; font-weight: 600; cursor: pointer;" title="Select AI tool">
             <option value="claude">Claude Code</option>
             <option value="opencode">OpenCode</option>
         </select>
+        <div class="header-info" id="modelInfo">Loading...</div>
     </div>
 
     <div class="main">
@@ -129,18 +129,20 @@
             document.getElementById('modelInfo').textContent = cfg.model + ' @ ' + new URL(cfg.base_url).hostname;
         });
 
-        // Load available tools
+        // Load available tools (preserve hardcoded options as fallback)
         fetch('/tools').then(r => r.json()).then(data => {
-            const sel = document.getElementById('toolSelector');
-            sel.innerHTML = '';
-            data.available.forEach(t => {
-                const opt = document.createElement('option');
-                opt.value = t;
-                opt.textContent = t === 'claude' ? 'Claude Code' : 'OpenCode';
-                if (t === data.default) opt.selected = true;
-                sel.appendChild(opt);
-            });
-        });
+            if (data && data.available && data.available.length > 0) {
+                const sel = document.getElementById('toolSelector');
+                sel.innerHTML = '';
+                data.available.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = t === 'claude' ? 'Claude Code' : 'OpenCode';
+                    if (t === data.default) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+            }
+        }).catch(() => { /* keep hardcoded options */ });
 
         // Tool selector: reconnect on change
         document.getElementById('toolSelector').addEventListener('change', () => {

@@ -139,6 +139,13 @@ def _proxy_to_api(base_url_path=None):
     """Core proxy logic used by both Claude and opencode."""
     try:
         req_data = request.get_json()
+
+        # Strip provider prefix from model name (opencode sends "anthropic/claude-xxx")
+        model = req_data.get("model", "")
+        if "/" in model:
+            model = model.split("/", 1)[1]
+            req_data["model"] = model
+
         body = json.dumps(req_data)
 
         messages = req_data.get("messages", [])
@@ -478,19 +485,15 @@ def start_ws_handler(flask_app):
                             suffix='.json', prefix='opencode_'
                         )
                         opencode_config = {
-                            "$schema": "https://opencode.ai/config.json",
                             "provider": {
                                 "anthropic": {
-                                    "name": "Anthropic",
                                     "options": {
                                         "apiKey": config["api_key"],
                                         "baseURL": "http://localhost:8080/v1"
                                     }
                                 }
                             },
-                            "model": {
-                                f"anthropic/{config['model']}": "*"
-                            }
+                            "model": f"anthropic/{config['model']}"
                         }
                         os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
                         os.close(config_fd)
@@ -560,19 +563,15 @@ def start_ws_handler(flask_app):
                             suffix='.json', prefix='opencode_'
                         )
                         opencode_config = {
-                            "$schema": "https://opencode.ai/config.json",
                             "provider": {
                                 "anthropic": {
-                                    "name": "Anthropic",
                                     "options": {
                                         "apiKey": config["api_key"],
                                         "baseURL": "http://localhost:8080/v1"
                                     }
                                 }
                             },
-                            "model": {
-                                f"anthropic/{config['model']}": "*"
-                            }
+                            "model": f"anthropic/{config['model']}"
                         }
                         os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
                         os.close(config_fd)

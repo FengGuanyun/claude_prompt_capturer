@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Debug</title></head><body>
+<h1>If you see this, server works</h1>
+<div id="result">Loading...</div>
+<script>
+fetch('http://localhost:8080/').then(r=>r.text()).then(html=>{
+  const hasTool = html.includes('toolSelector');
+  document.getElementById('result').innerHTML =
+    'toolSelector in HTML: <b>' + hasTool + '</b><br>' +
+    'HTML length: ' + html.length + '<br>' +
+    'First 200 chars of head:<br>' +
+    html.substring(html.indexOf('<body'), html.indexOf('<body')+300).replace(/</g,'&lt;');
+}).catch(e=>document.getElementById('result').textContent = 'Error: '+e);
+</script>
+</body></html>
