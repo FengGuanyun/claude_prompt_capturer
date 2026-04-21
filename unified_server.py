@@ -449,6 +449,88 @@ def proxy_api_get():
         return {"error": str(e)}, 500
 
 
+# ─── Agent Demo (local simulation) ───
+
+def _emit(event_type, data=None, details=None):
+    import time
+    entry = {
+        "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+        "type": event_type,
+    }
+    if data is not None:
+        entry["data"] = data
+    if details is not None:
+        entry["details"] = details
+    return f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+
+
+@app.route("/chat", methods=["POST"])
+def agent_chat():
+    """Simulated local agent demo — streams events showing the execution flow."""
+    try:
+        data = request.get_json()
+        user_message = data.get("message", "")
+
+        def generate():
+            config = load_claude_config()
+
+            # 1. Iteration start
+            yield _emit("iteration_start")
+            yield _emit("waiting", details={"message": "等待响应..."})
+
+            # 2. Prompt assembled
+            prompt_details = {
+                "system_prompt": "You are a helpful coding assistant. Help the user with their coding tasks.",
+                "messages": [
+                    {"role": "user", "content": user_message, "content_array": [{"type": "text", "text": user_message}], "tokens": len(user_message) // 4, "content_preview": user_message[:200]},
+                ],
+                "tools": [
+                    {"name": "read_file", "description": "Read file content"},
+                    {"name": "write_file", "description": "Write content to file"},
+                    {"name": "bash", "description": "Execute bash command"},
+                    {"name": "grep", "description": "Search file contents"},
+                ],
+            }
+            yield _emit("prompt_assembled", details=prompt_details)
+
+            # 3. Tool calls
+            time.sleep(0.3)
+            yield _emit("tool_call", details={"name": "read_file", "input": {"path": user_message.split()[-1] if user_message else "README.md"}})
+            time.sleep(0.5)
+            yield _emit("tool_result", details={"name": "read_file", "content": f"# Sample file content\nThis is a demo of the agent execution flow.\n\n# Simulated response showing file contents for: {user_message[:50]}", "is_error": False})
+
+            time.sleep(0.3)
+            yield _emit("tool_call", details={"name": "bash", "input": {"command": "ls -la"}})
+            time.sleep(0.5)
+            yield _emit("tool_result", details={"name": "bash", "content": "total 48\ndrwxr-xr-x  1 user user  4096 Apr 21 22:00 .\ndrwxr-xr-x 10 user user  4096 Apr 21 22:00 ..\n-rw-r--r--  1 user user  2048 Apr 21 22:00 README.md\n-rw-r--r--  1 user user 10240 Apr 21 22:00 demo.py", "is_error": False})
+
+            # 4. Second iteration
+            yield _emit("iteration_start")
+            yield _emit("prompt_assembled", details={
+                "system_prompt": "You are a helpful coding assistant.",
+                "messages": [
+                    {"role": "user", "content": user_message, "content_array": [{"type": "text", "text": user_message}], "tokens": len(user_message) // 4, "content_preview": user_message[:200]},
+                    {"role": "assistant", "content": "[Tool calls and results]", "content_array": [{"type": "tool_use", "name": "read_file", "input": {"path": "README.md"}}, {"type": "tool_result", "content": "File content here", "tool_use_id": "tool_1", "is_error": False}], "tokens": 50, "content_preview": "Tool calls executed"},
+                ],
+                "tools": [{"name": "read_file"}, {"name": "write_file"}, {"name": "bash"}, {"name": "grep"}],
+            })
+
+            time.sleep(0.5)
+
+            # 5. Final text response
+            response_text = f"好的，我已经查看了你的请求：「{user_message}」。\n\n这是 Agent 演示模式 —— 本地模拟了一个完整的执行流程，包括：\n\n1. 读取文件 (read_file)\n2. 执行命令 (bash: ls -la)\n3. 获取结果后返回\n\n在真实模式下，Agent 会通过代理调用实际的 API 来获取响应。"
+            for i in range(0, len(response_text), 3):
+                chunk = response_text[i:i+3]
+                yield _emit("text", data=chunk)
+                time.sleep(0.02)
+
+            yield _emit("iteration_end")
+
+        return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
 # ─── WebSocket PTY (integrated on same port) ───
 
 pty_procs = {}

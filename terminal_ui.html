@@ -12,8 +12,11 @@
         .header { height: 40px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; align-items: center; padding: 0 15px; flex-shrink: 0; }
         .header h1 { font-size: 15px; color: #79c0ff; font-weight: 700; letter-spacing: 0.5px; }
         .header-info { margin-left: auto; font-size: 13px; color: #8b949e; }
+        .tab-bar { display: flex; gap: 4px; }
+        .tab-btn { padding: 4px 12px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 5px; font-size: 12px; text-decoration: none; transition: all 0.2s; }
+        .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
         .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-        .terminal-panel { flex: 0 0 32%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; height: 100%; position: relative; }
+        .terminal-panel { flex: 0 0 40%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; height: 100%; position: relative; }
         .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 300px; height: 100%; }
         .panel-header { padding: 10px 15px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .panel-title { font-size: 14px; color: #e6edf3; font-weight: 600; }
@@ -93,6 +96,9 @@
 <body>
     <div class="header">
         <h1>Claude Terminal</h1>
+        <div class="tab-bar">
+            <a href="/agent" class="tab-btn" title="Agent Demo">🤖 Agent</a>
+        </div>
         <select id="toolSelector" style="margin-left: auto; margin-right: 10px; background: #2a4a20; color: #56d364; border: 2px solid #56d364; border-radius: 6px; padding: 4px 12px; font-size: 13px; font-weight: 600; cursor: pointer;" title="Select AI tool">
             <option value="claude">Claude Code</option>
             <option value="opencode">OpenCode</option>
@@ -154,7 +160,7 @@
         function initTerminal() {
             term = new Terminal({
                 cursorBlink: true,
-                fontSize: 15,
+                fontSize: 12,
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
                 allowProposedApi: true,
                 theme: {
