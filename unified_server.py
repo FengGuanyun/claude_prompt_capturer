@@ -103,6 +103,11 @@ def capture():
     return (Path(__file__).parent / "terminal_ui.html").read_text(), 200, {"Content-Type": "text/html"}
 
 
+@app.route("/agent")
+def agent_page():
+    return (Path(__file__).parent / "agent_ui.html").read_text(), 200, {"Content-Type": "text/html"}
+
+
 @app.route("/apps/<path:filename>")
 def serve_app(filename):
     return send_from_directory(APPS_DIR, filename)

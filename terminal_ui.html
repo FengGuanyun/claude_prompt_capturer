@@ -12,10 +12,6 @@
         .header { height: 40px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; align-items: center; padding: 0 15px; flex-shrink: 0; }
         .header h1 { font-size: 15px; color: #79c0ff; font-weight: 700; letter-spacing: 0.5px; }
         .header-info { margin-left: auto; font-size: 13px; color: #8b949e; }
-        .tab-bar { display: flex; gap: 4px; margin-left: 24px; }
-        .tab-btn { padding: 6px 14px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 6px; font-size: 13px; text-decoration: none; transition: all 0.2s; }
-        .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
-        .tab-btn.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
         .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
         .terminal-panel { flex: 0 0 32%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; height: 100%; position: relative; }
         .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 300px; height: 100%; }
@@ -97,10 +93,6 @@
 <body>
     <div class="header">
         <h1>Claude Terminal</h1>
-        <div class="tab-bar">
-            <a href="/agent" class="tab-btn" onclick="highlightTab(this)">🤖 Agent</a>
-            <a href="/" class="tab-btn active" onclick="highlightTab(this)">🖥️ 终端</a>
-        </div>
         <div class="header-info" id="modelInfo">Loading...</div>
     </div>
 
@@ -127,18 +119,6 @@
         let ws = null;
         let term = null;
         let capturedData = [];
-
-        // Tab navigation
-        function highlightTab(btn) {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const path = window.location.pathname;
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                if (btn.getAttribute('href') === path) btn.classList.add('active');
-            });
-        });
 
         // Load config
         fetch('/api_key').then(r => r.json()).then(cfg => {
