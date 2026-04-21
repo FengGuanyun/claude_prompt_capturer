@@ -480,22 +480,34 @@ def start_ws_handler(flask_app):
                     pty_inst = PTY(rows=40, cols=120)
 
                     if tool == "opencode":
-                        # Create temp opencode config for proxy routing
+                        # Mirror user's opencode config but route baseURL through proxy
+                        global_config = Path.home() / ".config" / "opencode" / "opencode.json"
+                        if global_config.exists():
+                            try:
+                                with open(global_config) as f:
+                                    oc = json.load(f)
+                            except Exception:
+                                oc = {}
+                        else:
+                            oc = {}
+
+                        # Rewrite all provider baseURLs to go through our proxy
+                        for prov in oc.get("provider", {}).values():
+                            opts = prov.get("options", {})
+                            if opts and "baseURL" in opts:
+                                opts["baseURL"] = "http://localhost:8080/v1"
+                            for mod in prov.get("models", {}).values():
+                                mod_opts = mod.get("options", {})
+                                if mod_opts and "baseURL" in mod_opts:
+                                    mod_opts["baseURL"] = "http://localhost:8080/v1"
+
+                        # Remove $schema to skip validation
+                        oc.pop("$schema", None)
+
                         config_fd, opencode_config_path = tempfile.mkstemp(
                             suffix='.json', prefix='opencode_'
                         )
-                        opencode_config = {
-                            "provider": {
-                                "anthropic": {
-                                    "options": {
-                                        "apiKey": config["api_key"],
-                                        "baseURL": "http://localhost:8080/v1"
-                                    }
-                                }
-                            },
-                            "model": f"anthropic/{config['model']}"
-                        }
-                        os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
+                        os.write(config_fd, json.dumps(oc, indent=2).encode())
                         os.close(config_fd)
                         os.environ["OPENCODE_CONFIG"] = opencode_config_path
                         cmd = "opencode"
@@ -559,21 +571,31 @@ def start_ws_handler(flask_app):
                     env["TERM"] = "xterm-256color"
 
                     if tool == "opencode":
+                        # Mirror user's opencode config but route baseURL through proxy
+                        global_config = Path.home() / ".config" / "opencode" / "opencode.json"
+                        if global_config.exists():
+                            try:
+                                with open(global_config) as f:
+                                    oc = json.load(f)
+                            except Exception:
+                                oc = {}
+                        else:
+                            oc = {}
+
+                        # Rewrite all provider baseURLs to go through our proxy
+                        for prov in oc.get("provider", {}).values():
+                            opts = prov.get("options", {})
+                            if opts:
+                                opts["baseURL"] = "http://localhost:8080/v1"
+                            for mod in prov.get("models", {}).values():
+                                mod_opts = mod.get("options", {})
+                                if mod_opts:
+                                    mod_opts["baseURL"] = "http://localhost:8080/v1"
+
                         config_fd, opencode_config_path = tempfile.mkstemp(
                             suffix='.json', prefix='opencode_'
                         )
-                        opencode_config = {
-                            "provider": {
-                                "anthropic": {
-                                    "options": {
-                                        "apiKey": config["api_key"],
-                                        "baseURL": "http://localhost:8080/v1"
-                                    }
-                                }
-                            },
-                            "model": f"anthropic/{config['model']}"
-                        }
-                        os.write(config_fd, json.dumps(opencode_config, indent=2).encode())
+                        os.write(config_fd, json.dumps(oc, indent=2).encode())
                         os.close(config_fd)
                         env["OPENCODE_CONFIG"] = opencode_config_path
                         cmd = ["opencode"]
