@@ -6,6 +6,7 @@ No agent chat — agent code is in server.py (local demo)
 import json
 import os
 import re
+import sys
 import subprocess
 import asyncio
 import tempfile
@@ -449,14 +450,95 @@ def proxy_api_get():
         return {"error": str(e)}, 500
 
 
-# ─── Agent Demo (local simulation) ───
+# ─── Agent Demo (mini-cc based) ───
 
-def _emit(event_type, data=None, details=None):
-    import time
-    entry = {
-        "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
-        "type": event_type,
-    }
+import os as _os
+import asyncio as _asyncio
+
+# ── mini-cc tools ──
+sys.path.insert(0, str(Path(__file__).parent / "mini-cc" / "src"))
+
+async def _execute_bash(args: dict) -> str:
+    command = args.get("command")
+    if not command:
+        return "执行命令时出错: command 不能为空"
+    DANGEROUS = [
+        re.compile(r'rm\s+-r[fF]?\s+/'), re.compile(r'mkfs\.'),
+        re.compile(r'dd\s+if=.*of=/dev/sda'), re.compile(r'>\s*/dev/sd[a-z]'),
+        re.compile(r'\$\([^)]+\)'), re.compile(r'`[^`]+`'),
+    ]
+    for pattern in DANGEROUS:
+        if pattern.search(command):
+            return f"命令执行被安全沙盒拒绝：包含高危指令模式 ({pattern.pattern})"
+    try:
+        process = await _asyncio.create_subprocess_shell(
+            command, stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE, cwd=_os.getcwd()
+        )
+        stdout, stderr = await process.communicate()
+        out = stdout.decode('utf-8', errors='replace')
+        err = stderr.decode('utf-8', errors='replace')
+        if err:
+            return f"[stdout]\n{out}\n[stderr]\n{err}"
+        return out or "命令执行成功，但没有输出。"
+    except Exception as e:
+        return f"执行命令时出错: {str(e)}"
+
+async def _execute_file_read(args: dict) -> str:
+    file_path = args.get("file_path")
+    if not file_path:
+        return "读取文件时出错：file_path 不能为空"
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        lines = content.split('\n')
+        if len(lines) > 1000:
+            return '\n'.join(lines[:1000]) + '\n\n... (文件已截断，仅显示前 1000 行)'
+        return content
+    except FileNotFoundError:
+        return f"错误：文件未找到。路径：{file_path}"
+    except Exception as e:
+        return f"读取文件时出错：{str(e)}"
+
+async def _execute_file_write(args: dict) -> str:
+    file_path = args.get("file_path")
+    content = args.get("content", "")
+    if not file_path:
+        return "写入文件时出错：file_path 不能为空"
+    try:
+        parent = Path(file_path).parent
+        if parent and not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"文件已成功写入: {file_path}"
+    except Exception as e:
+        return f"写入文件时出错：{str(e)}"
+
+AGENT_TOOLS = [
+    {
+        "name": "BashTool",
+        "description": "在本地系统执行 Bash/Shell 命令。用于运行测试、执行脚本、操作文件系统。注意：命令是 non-interactive 的，避免运行 vim/nano 等需要用户输入的命令。",
+        "inputSchema": {"type": "object", "properties": {"command": {"type": "string", "description": "需要执行的 shell 命令"}}, "required": ["command"]},
+        "execute": _execute_bash,
+    },
+    {
+        "name": "FileReadTool",
+        "description": "读取本地系统上的文件内容。请提供绝对路径。超过 1000 行的文件会被截断。",
+        "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string", "description": "需要读取文件的绝对路径"}}, "required": ["file_path"]},
+        "execute": _execute_file_read,
+    },
+    {
+        "name": "FileWriteTool",
+        "description": "向本地系统写入文件。如果目录不存在会自动创建。",
+        "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string", "description": "需要写入文件的绝对路径"}, "content": {"type": "string", "description": "要写入的内容"}}, "required": ["file_path", "content"]},
+        "execute": _execute_file_write,
+    },
+]
+
+
+def _emit_event(event_type, data=None, details=None):
+    entry = {"timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3], "type": event_type}
     if data is not None:
         entry["data"] = data
     if details is not None:
@@ -464,67 +546,228 @@ def _emit(event_type, data=None, details=None):
     return f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
 
 
+def _tool_definitions():
+    return [{
+        "type": "function",
+        "function": {
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["inputSchema"],
+        }
+    } for t in AGENT_TOOLS]
+
+
+async def _handle_tool_calls(tool_calls):
+    """Execute tool calls and return results."""
+    results = []
+    for call in tool_calls:
+        args = call.get("args", {})
+        if args.get("_parse_error"):
+            results.append({
+                "id": call["id"], "name": call["name"],
+                "result": f"[Agent 内部错误] 你输出的工具参数 JSON 格式不合法。\n原始参数:\n{args.get('_raw_arguments')}",
+                "isError": True,
+            })
+            continue
+        tool = next((t for t in AGENT_TOOLS if t["name"] == call["name"]), None)
+        if not tool:
+            results.append({
+                "id": call["id"], "name": call["name"],
+                "result": f"未知的工具调用: {call['name']}",
+                "isError": True,
+            })
+            continue
+        try:
+            result = await tool["execute"](args)
+            if isinstance(result, str) and len(result) > 8000:
+                result = result[:8000] + '\n\n...[由于内容过长，已被系统 microcompact 机制截断]...'
+            results.append({"id": call["id"], "name": call["name"], "result": result, "isError": False})
+        except Exception as e:
+            results.append({"id": call["id"], "name": call["name"], "result": f"执行工具 {call['name']} 时出错: {str(e)}", "isError": True})
+    return results
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    chinese = sum(1 for c in text if '一' <= c <= '鿿')
+    other = len(text) - chinese
+    return chinese // 2 + other // 4
+
+
 @app.route("/chat", methods=["POST"])
 def agent_chat():
-    """Simulated local agent demo — streams events showing the execution flow."""
+    """Real mini-cc agent loop — streams events with full execution flow."""
     try:
         data = request.get_json()
         user_message = data.get("message", "")
 
         def generate():
             config = load_claude_config()
+            api_key = config["api_key"]
+            base_url = config["base_url"]
+            model = config["model"]
 
-            # 1. Iteration start
-            yield _emit("iteration_start")
-            yield _emit("waiting", details={"message": "等待响应..."})
+            # Use OpenAI-compatible API via our proxy
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
 
-            # 2. Prompt assembled
-            prompt_details = {
-                "system_prompt": "You are a helpful coding assistant. Help the user with their coding tasks.",
-                "messages": [
-                    {"role": "user", "content": user_message, "content_array": [{"type": "text", "text": user_message}], "tokens": len(user_message) // 4, "content_preview": user_message[:200]},
-                ],
-                "tools": [
-                    {"name": "read_file", "description": "Read file content"},
-                    {"name": "write_file", "description": "Write content to file"},
-                    {"name": "bash", "description": "Execute bash command"},
-                    {"name": "grep", "description": "Search file contents"},
-                ],
-            }
-            yield _emit("prompt_assembled", details=prompt_details)
-
-            # 3. Tool calls
-            time.sleep(0.3)
-            yield _emit("tool_call", details={"name": "read_file", "input": {"path": user_message.split()[-1] if user_message else "README.md"}})
-            time.sleep(0.5)
-            yield _emit("tool_result", details={"name": "read_file", "content": f"# Sample file content\nThis is a demo of the agent execution flow.\n\n# Simulated response showing file contents for: {user_message[:50]}", "is_error": False})
-
-            time.sleep(0.3)
-            yield _emit("tool_call", details={"name": "bash", "input": {"command": "ls -la"}})
-            time.sleep(0.5)
-            yield _emit("tool_result", details={"name": "bash", "content": "total 48\ndrwxr-xr-x  1 user user  4096 Apr 21 22:00 .\ndrwxr-xr-x 10 user user  4096 Apr 21 22:00 ..\n-rw-r--r--  1 user user  2048 Apr 21 22:00 README.md\n-rw-r--r--  1 user user 10240 Apr 21 22:00 demo.py", "is_error": False})
-
-            # 4. Second iteration
-            yield _emit("iteration_start")
-            yield _emit("prompt_assembled", details={
-                "system_prompt": "You are a helpful coding assistant.",
-                "messages": [
-                    {"role": "user", "content": user_message, "content_array": [{"type": "text", "text": user_message}], "tokens": len(user_message) // 4, "content_preview": user_message[:200]},
-                    {"role": "assistant", "content": "[Tool calls and results]", "content_array": [{"type": "tool_use", "name": "read_file", "input": {"path": "README.md"}}, {"type": "tool_result", "content": "File content here", "tool_use_id": "tool_1", "is_error": False}], "tokens": 50, "content_preview": "Tool calls executed"},
-                ],
-                "tools": [{"name": "read_file"}, {"name": "write_file"}, {"name": "bash"}, {"name": "grep"}],
+            messages = []
+            messages.append({
+                "role": "system",
+                "content": "你是一个名为 mini-cc 的高级 AI 编程助手。你拥有读取文件、写入文件和执行终端命令的权限。你的目标是帮助用户解决复杂的软件工程问题。"
             })
 
-            time.sleep(0.5)
+            loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(loop)
 
-            # 5. Final text response
-            response_text = f"好的，我已经查看了你的请求：「{user_message}」。\n\n这是 Agent 演示模式 —— 本地模拟了一个完整的执行流程，包括：\n\n1. 读取文件 (read_file)\n2. 执行命令 (bash: ls -la)\n3. 获取结果后返回\n\n在真实模式下，Agent 会通过代理调用实际的 API 来获取响应。"
-            for i in range(0, len(response_text), 3):
-                chunk = response_text[i:i+3]
-                yield _emit("text", data=chunk)
-                time.sleep(0.02)
+            async def run_agent():
+                max_loops = 5
+                loop_count = 0
+                accumulated_text = ""
 
-            yield _emit("iteration_end")
+                # Add user message
+                messages.append({"role": "user", "content": user_message})
+
+                while True:
+                    loop_count += 1
+                    if loop_count > max_loops:
+                        yield _emit_event("text", data="\n[Agent] 工具调用循环次数过多，已强制终止。\n")
+                        return
+
+                    # Emit iteration start
+                    yield _emit_event("iteration_start")
+
+                    # Build prompt details for display
+                    sys_text = messages[0].get("content", "") if messages and messages[0]["role"] == "system" else ""
+                    prompt_msgs = []
+                    for m in messages:
+                        if m["role"] == "system":
+                            continue
+                        content = str(m.get("content", ""))
+                        content_preview = content[:200]
+                        content_array = [{"type": "text", "text": content}]
+                        # Show tool call details for tool messages
+                        if m.get("tool_call_id"):
+                            content_preview = f"[Tool Result: {m.get('tool_call_id')}]"
+                        prompt_msgs.append({
+                            "role": m["role"],
+                            "content": content,
+                            "content_array": content_array,
+                            "tokens": _estimate_tokens(content),
+                            "content_preview": content_preview,
+                        })
+
+                    prompt_details = {
+                        "system_prompt": sys_text,
+                        "messages": prompt_msgs[-10:],  # last 10 for display
+                        "tools": [{"name": t["name"], "description": t["description"]} for t in AGENT_TOOLS],
+                    }
+                    yield _emit_event("prompt_assembled", details=prompt_details)
+
+                    # Send to model
+                    yield _emit_event("waiting", details={"message": "等待模型响应..."})
+
+                    request_options = {
+                        "model": model,
+                        "messages": messages,
+                        "tools": _tool_definitions(),
+                        "temperature": 0.2,
+                        "stream": True,
+                    }
+
+                    stream = await client.chat.completions.create(**request_options)
+
+                    full_content = ''
+                    tool_calls_map = {}
+
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta if chunk.choices else None
+                        if not delta:
+                            continue
+
+                        # Handle text content
+                        if delta.content:
+                            full_content += delta.content
+                            accumulated_text += delta.content
+                            yield _emit_event("text", data=delta.content)
+
+                        # Handle tool calls
+                        if delta.tool_calls:
+                            for tc in delta.tool_calls:
+                                idx = tc.index
+                                if idx not in tool_calls_map:
+                                    tool_calls_map[idx] = {
+                                        "id": tc.id or f"call_{idx}",
+                                        "type": "function",
+                                        "function": {"name": tc.function.name or "", "arguments": ""},
+                                    }
+                                else:
+                                    if tc.function and tc.function.name:
+                                        tool_calls_map[idx]["function"]["name"] += tc.function.name
+                                    if tc.function and tc.function.arguments:
+                                        tool_calls_map[idx]["function"]["arguments"] += tc.function.arguments
+
+                    # Parse tool calls
+                    final_tool_calls = []
+                    for idx, t in tool_calls_map.items():
+                        raw_args = t["function"]["arguments"] or '{}'
+                        try:
+                            args = json.loads(raw_args)
+                        except json.JSONDecodeError:
+                            try:
+                                args = json.loads(raw_args.replace('\n', '\\n').replace('\r', '\\r'))
+                            except Exception:
+                                args = {"_parse_error": True, "_raw_arguments": raw_args}
+                        final_tool_calls.append({
+                            "id": t["id"], "name": t["function"]["name"], "args": args,
+                        })
+
+                    # Build assistant message
+                    assistant_msg = {"role": "assistant", "content": full_content or None}
+                    if final_tool_calls:
+                        assistant_msg["tool_calls"] = [
+                            {"id": t["id"], "type": "function", "function": {"name": t["name"], "arguments": json.dumps(t.get("args", {}))}}
+                            for t in tool_calls_map.values()
+                        ]
+                    messages.append(assistant_msg)
+
+                    if not final_tool_calls:
+                        # No more tool calls, we're done
+                        yield _emit_event("iteration_end")
+                        return
+
+                    # Execute tool calls
+                    for tc in final_tool_calls:
+                        yield _emit_event("tool_call", details={
+                            "name": tc["name"],
+                            "input": tc["args"],
+                        })
+
+                    tool_results = await _handle_tool_calls(final_tool_calls)
+
+                    for tr in tool_results:
+                        yield _emit_event("tool_result", details={
+                            "name": tr["name"],
+                            "content": str(tr["result"]),
+                            "is_error": tr.get("isError", False),
+                        })
+
+                    # Add tool results to messages
+                    for tr in tool_results:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tr["id"],
+                            "content": str(tr["result"]),
+                        })
+
+            try:
+                for event in loop.run_until_complete(run_agent()):
+                    yield event
+            except Exception as e:
+                yield _emit_event("error", details={"message": str(e)})
+            finally:
+                loop.close()
 
         return Response(stream_with_context(generate()), mimetype="text/event-stream")
     except Exception as e:
