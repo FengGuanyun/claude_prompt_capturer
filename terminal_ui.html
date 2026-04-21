@@ -119,6 +119,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-attach@0.9.0/lib/xterm-addon-attach.min.js"></script>
     <script>
         let ws = null;
         let term = null;
@@ -155,6 +156,7 @@
                 cursorBlink: true,
                 fontSize: 15,
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                allowProposedApi: true,
                 theme: {
                     background: '#0d1117',
                     foreground: '#c9d1d9',
@@ -167,7 +169,6 @@
             term.loadAddon(fitAddon);
             term.open(document.getElementById('terminal-container'));
             fitAddon.fit();
-            term.write('Connecting to Claude CLI...\r\n');
 
             // Refit terminal when window resizes
             const ro = new ResizeObserver(() => { fitAddon && fitAddon.fit(); });
@@ -179,6 +180,8 @@
             return match ? match[1] : '';
         }
 
+        let attachAddon = null;
+
         function connect() {
             const sid = getSessionId();
             const tool = document.getElementById('toolSelector').value || 'claude';
@@ -189,33 +192,24 @@
             ws.onopen = () => {
                 document.getElementById('status').textContent = 'Connected';
                 document.getElementById('status').className = 'status success';
-            };
-
-            ws.onmessage = (event) => {
-                if (term) term.write(event.data);
+                // Attach terminal to WebSocket for proper local echo
+                if (term) {
+                    attachAddon = new AttachAddon.AttachAddon(ws);
+                    term.loadAddon(attachAddon);
+                }
             };
 
             ws.onclose = () => {
-                document.getElementById('status').textContent = 'Disconnected - Claude CLI not available on server';
+                attachAddon = null;
+                document.getElementById('status').textContent = 'Disconnected';
                 document.getElementById('status').className = 'status error';
-                if (term) term.write('\r\n\x1b[31mClaude CLI is not installed on the server.\x1b[0m\r\n');
-                if (term) term.write('Use the Agent tab to chat with Claude.\r\n');
             };
 
             ws.onerror = () => {
-                document.getElementById('status').textContent = 'Connection error - Claude CLI not available';
+                attachAddon = null;
+                document.getElementById('status').textContent = 'Connection error';
                 document.getElementById('status').className = 'status error';
-                if (term) term.write('\r\n\x1b[31mCannot connect to Claude CLI.\x1b[0m\r\n');
-                if (term) term.write('Use the Agent tab to chat with Claude.\r\n');
             };
-
-            if (term) {
-                term.onData((data) => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(data);
-                    }
-                });
-            }
         }
 
         let expandedIds = new Set();

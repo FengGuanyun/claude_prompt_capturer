@@ -477,7 +477,7 @@ def start_ws_handler(flask_app):
                 config = load_claude_config()
 
                 if IS_WINDOWS:
-                    pty_inst = PTY(rows=24, cols=80)
+                    pty_inst = PTY(rows=40, cols=120)
 
                     if tool == "opencode":
                         # Create temp opencode config for proxy routing
