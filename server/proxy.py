@@ -177,7 +177,8 @@ def proxy_to_api(base_url_path: str | None = None):
                 headers[k] = v
 
         try:
-            resp = httpx.post(target_url, content=body, headers=headers, timeout=120)
+            # Disable SSL verification for local development (DashScope SSL issues in some networks)
+            resp = httpx.post(target_url, content=body, headers=headers, timeout=120, verify=False)
             ct = resp.headers.get("content-type", "")
             content_data = resp.content
             resp.close()
@@ -186,11 +187,9 @@ def proxy_to_api(base_url_path: str | None = None):
             debug_entry["response_preview"] = content_data[:500].decode("utf-8", errors="replace") if not b"text/event-stream" in ct.encode() else "(streaming)"
             write_debug_log(debug_entry)
 
-            if "text/event-stream" in ct:
-                return Response(content_data, mimetype="text/event-stream")
-            else:
-                return Response(f"data: {content_data.decode('utf-8')}\n\n",
-                               mimetype="text/event-stream")
+            # Return response preserving the original content-type
+            # Claude Code CLI expects either JSON or SSE depending on the request
+            return Response(content_data, status=resp.status_code, content_type=ct)
         except Exception as e:
             debug_entry["error"] = str(e)
             write_debug_log(debug_entry)

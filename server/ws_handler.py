@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import queue
+import signal
 import subprocess
 import tempfile
 import threading
@@ -85,11 +86,11 @@ async def _build_opencode_config():
     for prov in oc.get("provider", {}).values():
         opts = prov.get("options", {})
         if opts and "baseURL" in opts:
-            opts["baseURL"] = "http://localhost:8080/v1"
+            opts["baseURL"] = "http://localhost:8080/apps/anthropic"
         for mod in prov.get("models", {}).values():
             mod_opts = mod.get("options", {})
             if mod_opts and "baseURL" in mod_opts:
-                mod_opts["baseURL"] = "http://localhost:8080/v1"
+                mod_opts["baseURL"] = "http://localhost:8080/apps/anthropic"
 
     oc.pop("$schema", None)
 
@@ -115,7 +116,8 @@ def _build_claude_proxy_settings(config: dict):
 
 
 async def _handle_windows_pty(websocket, tool, config, proc_id):
-    pty_inst = PTY(rows=40, cols=120)
+    # Start with default size, will be resized by client
+    pty_inst = PTY(rows=24, cols=80)
     cleanup_paths = []
 
     try:
@@ -163,6 +165,17 @@ async def _handle_windows_pty(websocket, tool, config, proc_id):
         async def write_input():
             try:
                 async for msg in websocket:
+                    # Handle resize messages from client
+                    if isinstance(msg, str):
+                        try:
+                            data = json.loads(msg)
+                            if data.get('type') == 'resize':
+                                cols = data.get('cols', 80)
+                                rows = data.get('rows', 24)
+                                pty_inst.resize(cols, rows)
+                                continue
+                        except json.JSONDecodeError:
+                            pass
                     pty_inst.write(msg)
             except Exception:
                 pass
@@ -182,6 +195,9 @@ async def _handle_windows_pty(websocket, tool, config, proc_id):
 
 async def _handle_unix_pty(websocket, tool, config, proc_id):
     import pty
+    import struct
+    import fcntl
+    import termios
 
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
@@ -204,6 +220,16 @@ async def _handle_unix_pty(websocket, tool, config, proc_id):
     )
     os.close(slave_fd)
     pty_procs[proc_id] = (master_fd, proc)
+
+    def resize_pty(cols, rows):
+        """Resize the PTY using TIOCSWINSZ ioctl."""
+        try:
+            winsize = struct.pack('HHHH', rows, cols, 0, 0)
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+            # Send SIGWINCH to notify the process
+            os.kill(proc.pid, signal.SIGWINCH)
+        except Exception:
+            pass
 
     try:
         q = asyncio.Queue()
@@ -231,9 +257,21 @@ async def _handle_unix_pty(websocket, tool, config, proc_id):
                     continue
 
         async def write_input():
+            import signal
             try:
                 async for msg in websocket:
                     if master_fd is not None:
+                        # Handle resize messages from client
+                        if isinstance(msg, str):
+                            try:
+                                data = json.loads(msg)
+                                if data.get('type') == 'resize':
+                                    cols = data.get('cols', 80)
+                                    rows = data.get('rows', 24)
+                                    resize_pty(cols, rows)
+                                    continue
+                            except json.JSONDecodeError:
+                                pass
                         os.write(master_fd, msg.encode('utf-8'))
             except Exception:
                 pass
