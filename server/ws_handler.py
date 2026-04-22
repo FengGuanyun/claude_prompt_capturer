@@ -1,6 +1,7 @@
 """WebSocket PTY handler — runs on port 5001, bridges browser ↔ PTY ↔ Claude/OpenCode."""
 
 import asyncio
+import hashlib
 import json
 import os
 import platform
@@ -38,15 +39,19 @@ def start_ws_handler(flask_app):
             path = websocket.request.path if hasattr(websocket, 'request') else ''
             qs = parse_qs(urlparse(path).query)
             tool = qs.get('tool', ['claude'])[0]
+            rows = int(qs.get('rows', [40])[0])
+            cols = int(qs.get('cols', [120])[0])
             proc_id = id(websocket)
+            print(f"[WS] New connection: tool={tool}, rows={rows}, cols={cols}")
 
             try:
                 config = load_claude_config()
 
                 if IS_WINDOWS:
-                    await _handle_windows_pty(websocket, tool, config, proc_id)
+                    print(f"[WS] Starting Windows PTY for {tool}")
+                    await _handle_windows_pty(websocket, tool, config, proc_id, rows, cols)
                 else:
-                    await _handle_unix_pty(websocket, tool, config, proc_id)
+                    await _handle_unix_pty(websocket, tool, config, proc_id, rows, cols)
 
             except Exception as e:
                 print(f"PTY error: {e}")
@@ -115,9 +120,9 @@ def _build_claude_proxy_settings(config: dict):
     return settings_path
 
 
-async def _handle_windows_pty(websocket, tool, config, proc_id):
-    # Start with default size, will be resized by client
-    pty_inst = PTY(rows=24, cols=80)
+async def _handle_windows_pty(websocket, tool, config, proc_id, rows=40, cols=120):
+    # Use client-reported dimensions for proper rendering
+    pty_inst = PTY(rows=rows, cols=cols)
     cleanup_paths = []
 
     try:
@@ -193,7 +198,7 @@ async def _handle_windows_pty(websocket, tool, config, proc_id):
             pass
 
 
-async def _handle_unix_pty(websocket, tool, config, proc_id):
+async def _handle_unix_pty(websocket, tool, config, proc_id, rows=40, cols=120):
     import pty
     import struct
     import fcntl
@@ -214,6 +219,9 @@ async def _handle_unix_pty(websocket, tool, config, proc_id):
         cmd = ["claude", "--settings", settings_path]
 
     master_fd, slave_fd = pty.openpty()
+    # Set PTY to client-reported dimensions before starting process
+    winsize = struct.pack('HHHH', rows, cols, 0, 0)
+    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
     proc = subprocess.Popen(
         cmd, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
         env=env, preexec_fn=os.setsid

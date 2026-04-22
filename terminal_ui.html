@@ -184,6 +184,7 @@
     <script>
         let ws = null;
         let term = null;
+        let fitAddon = null;
         let capturedData = [];
 
         // Load config
@@ -221,8 +222,19 @@
             document.querySelectorAll('#toolSwitcher .tool-option').forEach(el => {
                 el.classList.toggle('active', el.dataset.tool === tool);
             });
-            if (ws) ws.close();
-            connect();
+            if (ws) {
+                ws.onclose = null;
+                ws.onerror = null;
+                ws.close();
+                ws = null;
+            }
+            // Clear terminal display and remove old input handler
+            if (term) term.clear();
+            if (inputHandlerDisposable) {
+                inputHandlerDisposable.dispose();
+                inputHandlerDisposable = null;
+            }
+            setTimeout(() => connect(), 300);
         }
 
         function initTerminal() {
@@ -239,39 +251,29 @@
                     selectionBackground: '#264f78'
                 }
             });
-            const fitAddon = new FitAddon.FitAddon();
+            fitAddon = new FitAddon.FitAddon();
             term.loadAddon(fitAddon);
             term.open(document.getElementById('terminal-container'));
             fitAddon.fit();
 
             // Refit terminal and notify server when window resizes
+            let resizeTimer = null;
             const ro = new ResizeObserver(() => {
-                if (fitAddon && ws && ws.readyState === WebSocket.OPEN) {
-                    const dims = fitAddon.fit();
-                    if (dims) {
-                        ws.send(JSON.stringify({
-                            type: 'resize',
-                            cols: dims.cols,
-                            rows: dims.rows
-                        }));
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    if (fitAddon && ws && ws.readyState === WebSocket.OPEN) {
+                        const dims = fitAddon.fit();
+                        if (dims) {
+                            ws.send(JSON.stringify({
+                                type: 'resize',
+                                cols: dims.cols,
+                                rows: dims.rows
+                            }));
+                        }
                     }
-                }
+                }, 200);
             });
             ro.observe(document.getElementById('terminal-container'));
-
-            // Send initial size
-            setTimeout(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const dims = fitAddon.fit();
-                    if (dims) {
-                        ws.send(JSON.stringify({
-                            type: 'resize',
-                            cols: dims.cols,
-                            rows: dims.rows
-                        }));
-                    }
-                }
-            }, 100);
         }
 
         function getSessionId() {
@@ -280,26 +282,48 @@
         }
 
         let attachAddon = null;
+        let inputHandlerDisposable = null;
 
         function connect() {
             const sid = getSessionId();
             const tool = getSelectedTool();
-            // Connect to the WebSocket PTY server on port 5001
-            const wsUrl = `ws://localhost:5001/ws?tool=${tool}` + (sid ? '&session_id=' + sid : '');
+            // Fit first, then use term's actual dimensions
+            fitAddon.fit();
+            const cols = term.cols;
+            const rows = term.rows;
+            // Include dimensions in URL so PTY is created with correct size
+            const wsUrl = `ws://localhost:5001/ws?tool=${tool}&rows=${rows}&cols=${cols}` + (sid ? '&session_id=' + sid : '');
+            // Remove old input handler BEFORE opening new connection
+            if (inputHandlerDisposable) {
+                inputHandlerDisposable.dispose();
+                inputHandlerDisposable = null;
+            }
+            if (ws) ws.close();
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
                 document.getElementById('status').textContent = 'Connected';
                 document.getElementById('status').className = 'status success';
-                // Attach terminal to WebSocket for proper local echo
                 if (term) {
-                    attachAddon = new AttachAddon.AttachAddon(ws);
-                    term.loadAddon(attachAddon);
+                    // Manual bridge: only display PTY output (no local echo)
+                    ws.onmessage = (event) => {
+                        term.write(event.data);
+                    };
+                    // Forward terminal keystrokes to PTY
+                    inputHandlerDisposable = term.onData((data) => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(data);
+                        }
+                    });
                 }
             };
 
             ws.onclose = () => {
                 attachAddon = null;
+                if (inputHandlerDisposable) {
+                    inputHandlerDisposable.dispose();
+                    inputHandlerDisposable = null;
+                }
                 document.getElementById('status').textContent = 'Disconnected';
                 document.getElementById('status').className = 'status error';
             };
