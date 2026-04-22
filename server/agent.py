@@ -207,8 +207,9 @@ def agent_chat():
 
                     prompt_details = {
                         "system_prompt": system_prompt,
-                        "messages": prompt_msgs[-10:],
+                        "messages": prompt_msgs,
                         "tools": [{"name": t["name"], "description": t["description"]} for t in AGENT_TOOLS],
+                        "is_agent_loop": loop_count > 0,
                     }
                     q.put(_emit_event("prompt_assembled", details=prompt_details))
                     q.put(_emit_event("waiting", details={"message": "等待模型响应..."}))
@@ -246,7 +247,6 @@ def agent_chat():
                             if block.get("type") == "text":
                                 text = block.get("text", "")
                                 full_content += text
-                                q.put(_emit_event("text", data=text))
                             elif block.get("type") == "tool_use":
                                 tool_calls.append(block)
 
@@ -265,9 +265,18 @@ def agent_chat():
 
                     if not tool_calls:
                         # No tool calls — text reply only, conversation done
+                        if full_content:
+                            q.put(_emit_event("text", data=full_content))
                         return
 
-                    # ── Tool calls exist — execute ──
+                    # ── Tool calls exist — emit iteration header BEFORE tool events ──
+                    loop_count += 1
+                    q.put(_emit_event("iteration_start", details={"loop": loop_count}))
+
+                    # If there's text before tools, it's the thinking process
+                    if full_content:
+                        q.put(_emit_event("thinking", data=full_content))
+
                     for tc in tool_calls:
                         q.put(_emit_event("tool_call", details={
                             "name": tc["name"],
@@ -290,9 +299,6 @@ def agent_chat():
 
                     tool_results = await _handle_tool_calls(internal_tool_calls)
 
-                    loop_count += 1
-                    q.put(_emit_event("iteration_start"))
-
                     for tr in tool_results:
                         q.put(_emit_event("tool_result", details={
                             "name": tr["name"],
@@ -309,6 +315,9 @@ def agent_chat():
                                 "content": str(tr["result"]),
                             }],
                         })
+
+                    # Merge consecutive user messages into a single message
+                    messages = _merge_user_messageses(messages)
 
                     q.put(_emit_event("iteration_end"))
 
@@ -343,6 +352,24 @@ def agent_chat():
 
 # ─── Internal: message conversion ─────────────────────────────────────────────
 
+def _merge_user_messageses(msgs):
+    """Merge consecutive user/assistant messages with same role."""
+    if not msgs:
+        return msgs
+    merged = [msgs[0]]
+    for m in msgs[1:]:
+        prev = merged[-1]
+        if m["role"] == prev["role"]:
+            prev_content = prev["content"]
+            new_content = m["content"]
+            if isinstance(prev_content, list) and isinstance(new_content, list):
+                prev["content"] = prev_content + new_content
+            else:
+                prev["content"] = str(prev_content) + str(new_content)
+        else:
+            merged.append(m)
+    return merged
+
 def _to_anthropic_messages(msgs):
     """Convert internal message format to Anthropic message content blocks."""
     anthropic_msgs = []
@@ -357,18 +384,23 @@ def _to_anthropic_messages(msgs):
             else:
                 anthropic_msgs.append({"role": "user", "content": [{"type": "text", "text": str(content)}]})
         elif role == "assistant":
-            blocks = []
-            if content:
-                blocks.append({"type": "text", "text": str(content)})
-            for tc in m.get("tool_calls", []):
-                blocks.append({
-                    "type": "tool_use",
-                    "id": tc["id"],
-                    "name": tc["function"]["name"],
-                    "input": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
-                })
-            if blocks:
-                anthropic_msgs.append({"role": "assistant", "content": blocks})
+            if isinstance(content, list):
+                # Already in Anthropic format (content blocks), pass through
+                anthropic_msgs.append({"role": "assistant", "content": content})
+            else:
+                # OpenAI format, convert
+                blocks = []
+                if content:
+                    blocks.append({"type": "text", "text": str(content)})
+                for tc in m.get("tool_calls", []):
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "input": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
+                    })
+                if blocks:
+                    anthropic_msgs.append({"role": "assistant", "content": blocks})
         elif role == "tool":
             tool_result = {
                 "type": "tool_result",

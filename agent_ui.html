@@ -28,23 +28,32 @@
         /* Left: Chat */
         .chat-panel { flex: 0 0 28%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 220px; }
         .chat-messages { flex: 1; overflow-y: auto; padding: 12px; }
-        .msg { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; max-width: 90%; word-break: break-word; }
+        /* Chat */
+        .msg { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.6; max-width: 90%; word-break: break-word; }
         .msg.user { background: #1a3a5c; margin-left: auto; border-bottom-right-radius: 2px; }
         .msg.assistant { background: #111d2b; border: 1px solid #1e2530; border-bottom-left-radius: 2px; }
-        .msg .ts { font-size: 10px; color: #4a5568; margin-top: 4px; }
+        .msg .ts { font-size: 10px; color: #4a5568; margin-top: 6px; }
         .msg .role { font-size: 10px; color: #4a5568; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
         .msg.user .role { color: #3d6a9f; }
         .msg.assistant .role { color: #4a5568; }
-        .msg pre { white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
-        .msg pre code { background: #0a0e14; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+        .msg p { margin: 6px 0; }
+        .msg pre { white-space: pre-wrap; font-size: 12px; line-height: 1.5; background: #0a0e14; padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+        .msg pre code { background: none; padding: 0; font-size: 12px; }
+        .msg code { background: #0a0e14; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-family: 'SF Mono', 'Menlo', monospace; }
         .msg blockquote { border-left: 3px solid #30363d; padding-left: 10px; margin: 6px 0; color: #8b949e; }
         .msg ul, .msg ol { padding-left: 20px; margin: 6px 0; }
         .msg li { margin: 3px 0; }
-        .msg h1, .msg h2, .msg h3 { margin: 8px 0 4px; }
+        .msg h1, .msg h2, .msg h3, .msg h4, .msg h5 { margin: 10px 0 4px; font-weight: 700; }
+        .msg h1 { font-size: 16px; }
+        .msg h2 { font-size: 14px; }
+        .msg h3 { font-size: 13px; }
+        .msg h4 { font-size: 12px; }
         .msg table { border-collapse: collapse; margin: 6px 0; }
         .msg th, .msg td { border: 1px solid #30363d; padding: 4px 8px; }
+        .msg th { background: #1a2030; }
         .msg strong { color: #fff; }
         .msg a { color: #79c0ff; }
+        .msg hr { border: none; border-top: 1px solid #2a3040; margin: 10px 0; }
         .msg-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 13px; line-height: 1.8; }
 
         /* Input */
@@ -55,7 +64,7 @@
         .send-btn:hover { background: #2da64b; }
         .send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
 
-        /* Middle: Flow Timeline */
+        /* Flow Timeline */
         .flow-panel { flex: 1; display: flex; flex-direction: column; min-width: 220px; background: #0a0e14; }
         .flow-header { padding: 10px 14px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .flow-header h2 { font-size: 13px; color: #79c0ff; font-weight: 600; }
@@ -64,22 +73,56 @@
         .btn-sm:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
         .btn-sm.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
 
-        .flow-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .flow-content { flex: 1; overflow-y: auto; padding: 10px 10px 10px 18px; }
 
-        /* Event Cards */
-        .event-card { margin-bottom: 6px; border-radius: 6px; background: #111620; border: 1px solid #1e2530; overflow: hidden; }
-        .event-header { display: flex; align-items: center; padding: 8px 10px; cursor: pointer; gap: 8px; }
+        /* ── Timeline connector ── */
+        .timeline-item { position: relative; padding-left: 24px; margin-bottom: 4px; }
+        .timeline-item::before {
+            content: ''; position: absolute; left: 7px; top: 0; bottom: 0;
+            width: 2px; background: #1e2530;
+        }
+        .timeline-item:last-child::before { display: none; }
+        .timeline-dot {
+            position: absolute; left: 0; top: 8px; width: 16px; height: 16px;
+            border-radius: 50%; border: 2px solid #4a5568; background: #0a0e14;
+            z-index: 1; display: flex; align-items: center; justify-content: center;
+            font-size: 8px;
+        }
+
+        /* Timeline dot colors per type */
+        .dot-prompt_assembled { border-color: #56d364; background: #56d364; }
+        .dot-waiting { border-color: #8b949e; background: #8b949e; animation: pulse 1.5s ease-in-out infinite; }
+        .dot-iteration_start { border-color: #d2a8ff; background: #d2a8ff; }
+        .dot-tool_call { border-color: #e8870a; background: #e8870a; }
+        .dot-tool_result { border-color: #3fb950; background: #3fb950; }
+        .dot-text { border-color: #58a6ff; background: #58a6ff; }
+        .dot-thinking { border-color: #d2a8ff; background: #d2a8ff; opacity: 0.6; }
+        .dot-error { border-color: #f85149; background: #f85149; }
+        .dot-iteration_end { border-color: #d2a8ff; background: transparent; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.7); }
+        }
+
+        /* ── Event Cards ── */
+        .event-card {
+            margin-bottom: 2px; border-radius: 6px; background: #111620;
+            border: 1px solid #1e2530; border-left: 3px solid #2a3040;
+            overflow: hidden; transition: border-color 0.15s;
+        }
+        .event-card.event-prompt_assembled { border-left-color: #56d364; }
+        .event-card.event-waiting { border-left-color: #8b949e; }
+        .event-card.event-tool_call { border-left-color: #e8870a; }
+        .event-card.event-tool_result { border-left-color: #3fb950; }
+        .event-card.event-text { border-left-color: #58a6ff; }
+        .event-card.event-error { border-left-color: #f85149; }
+        .event-card.event-iteration_end { border-left-color: #d2a8ff; }
+
+        .event-header { display: flex; align-items: center; padding: 6px 10px; cursor: pointer; gap: 8px; }
         .event-header:hover { background: #1a2030; }
-        .event-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
-        .icon-text { background: #1a3a5c; } .icon-tool_call { background: #5c2d0a; }
-        .icon-tool_result { background: #0d3320; } .icon-error { background: #3d0a0a; }
-        .icon-iteration_start { background: #2d1a3d; } .icon-iteration_end { background: #1a0d2d; }
-        .icon-prompt_assembled { background: #0a2d3d; } .icon-waiting { background: #1a2030; }
-
-        .event-info { flex: 1; min-width: 0; }
-        .event-type { font-size: 10px; color: #6e7a8a; text-transform: uppercase; font-weight: 700; letter-spacing: 0.3px; }
-        .event-preview { font-size: 12px; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-        .event-time { font-size: 10px; color: #4a5568; flex-shrink: 0; }
+        .event-label { font-size: 12px; font-weight: 500; color: #c9d1d9; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .event-time { font-size: 10px; color: #4a5568; flex-shrink: 0; margin-left: 8px; }
         .event-arrow { font-size: 10px; color: #4a5568; transition: transform 0.15s; flex-shrink: 0; }
         .event-card.open .event-arrow { transform: rotate(90deg); color: #79c0ff; }
 
@@ -87,13 +130,58 @@
         .event-card.open .event-body { display: block; }
         .event-body pre { padding: 10px 12px; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #8b949e; font-family: 'SF Mono', 'Menlo', monospace; margin: 0; }
 
-        /* Tool call body special formatting */
-        .tool-call-detail { padding: 10px 12px; }
-        .tool-call-detail h4 { font-size: 11px; color: #e8870a; text-transform: uppercase; font-weight: 700; margin: 8px 0 4px; letter-spacing: 0.5px; }
-        .tool-call-detail h4:first-child { margin-top: 0; }
-        .tool-call-detail pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; margin: 4px 0; }
-        .tool-call-detail .tool-result-body { background: #0d1a10; border-color: #1e3320; }
-        .tool-call-detail .tool-result-body.error { background: #1d0d0d; border-color: #331e1e; }
+        /* ── Step label (compact mode for simple events) ── */
+        .step-label {
+            display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+            font-size: 11px; color: #8b949e; background: #0d1117;
+            border-radius: 4px; margin: 2px 0;
+        }
+        .step-label .step-text { flex: 1; }
+        .step-label .step-time { font-size: 10px; color: #4a5568; }
+
+        /* ── Tool pair card ── */
+        .tool-pair-card {
+            margin-bottom: 2px; border-radius: 6px; background: #111620;
+            border: 1px solid #1e2530; border-left: 3px solid #e8870a;
+            overflow: hidden;
+        }
+        .tool-pair-header { display: flex; align-items: center; padding: 6px 10px; cursor: pointer; gap: 8px; }
+        .tool-pair-header:hover { background: #1a2030; }
+        .tool-pair-icon { font-size: 12px; flex-shrink: 0; }
+        .tool-pair-name { font-size: 12px; font-weight: 600; color: #e8870a; flex: 1; }
+        .tool-pair-status { font-size: 10px; flex-shrink: 0; }
+        .tool-pair-status.success { color: #3fb950; }
+        .tool-pair-status.error { color: #f85149; }
+        .tool-pair-arrow { font-size: 10px; color: #4a5568; transition: transform 0.15s; }
+        .tool-pair-card.open .tool-pair-arrow { transform: rotate(90deg); color: #79c0ff; }
+
+        .tool-pair-body { display: none; border-top: 1px solid #1e2530; }
+        .tool-pair-card.open .tool-pair-body { display: block; }
+        .tool-pair-section { padding: 6px 10px; }
+        .tool-pair-section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
+        .tool-pair-section-title.call { color: #e8870a; }
+        .tool-pair-section-title.result { color: #3fb950; }
+        .tool-pair-section-title.result.is-error { color: #f85149; }
+        .tool-pair-section pre {
+            background: #0d1117; border-radius: 4px; padding: 6px 8px;
+            font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+            color: #8b949e; font-family: 'SF Mono', 'Menlo', monospace; margin: 0;
+            max-height: 150px; overflow-y: auto;
+        }
+        .tool-pair-section pre.result-ok { background: #0d1a10; color: #7ee787; }
+        .tool-pair-section pre.result-error { background: #1d0d0d; color: #f85149; }
+
+        /* ── Text response card (special) ── */
+        .text-card .event-label { color: #58a6ff; font-weight: 500; }
+
+        /* ── Error card (special) ── */
+        .error-card .event-label { color: #f85149; }
+
+        /* ── Waiting card (special) ── */
+        .waiting-card .event-label { color: #8b949e; font-style: italic; }
+
+        /* Thinking card */
+        .thinking-card .event-label { color: #d2a8ff; font-style: italic; }
 
         /* Prompt assembled special formatting */
         .prompt-detail { padding: 10px 12px; }
@@ -147,50 +235,35 @@
         /* Flow empty state */
         .flow-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 12px; line-height: 1.8; }
 
-        /* Iteration separator */
-        .iter-sep { text-align: center; padding: 4px 10px; margin: 4px 0; }
-        .iter-sep span { background: #2d1a3d; color: #d2a8ff; padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 700; }
-
         /* Conversation container - wraps one user+agent exchange */
         .conv-container {
-            margin: 10px 0;
-            border-top: 1px solid #2a2040;
-            padding-top: 6px;
+            margin: 8px 0 12px; padding: 6px 0 4px;
+            border-left: 2px solid #2a2040; padding-left: 10px;
         }
-        .conv-container:first-child { border-top: none; margin-top: 0; }
+        .conv-container:first-child { margin-top: 0; }
         .conv-label {
-            font-size: 11px;
-            color: #6a5080;
-            margin-bottom: 4px;
-            padding: 0 8px;
-            font-weight: 600;
+            font-size: 11px; color: #6a5080; margin-bottom: 6px;
+            font-weight: 600; background: #1a1128; padding: 3px 8px;
+            border-radius: 4px; display: inline-block;
         }
 
         /* Iteration container - wraps all events in one iteration */
         .iter-container {
-            margin: 6px 0;
-            border-left: 2px solid #3d2a5c;
-            padding-left: 8px;
-            border-radius: 4px;
+            margin: 4px 0 4px 4px; padding: 6px 8px;
+            background: #110d1a; border-radius: 6px;
+            border: 1px solid #2d1a3d;
         }
+
         .iter-container .iter-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 4px 8px;
-            background: #1a1128;
-            border-radius: 4px;
-            margin-bottom: 2px;
-            cursor: pointer;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 4px 8px; border-radius: 4px; margin-bottom: 4px;
+            cursor: pointer; background: #1a1128;
         }
         .iter-container .iter-header:hover { background: #241838; }
         .iter-container .iter-label { color: #d2a8ff; font-size: 12px; font-weight: 600; }
         .iter-container .iter-badge {
-            background: #2d1a3d;
-            color: #d2a8ff;
-            padding: 1px 8px;
-            border-radius: 10px;
-            font-size: 10px;
+            background: #2d1a3d; color: #d2a8ff; padding: 1px 8px;
+            border-radius: 10px; font-size: 10px;
         }
         .iter-container .iter-arrow { color: #666; font-size: 10px; transition: transform 0.15s; }
         .iter-container.collapsed .iter-arrow { transform: rotate(-90deg); }
@@ -290,17 +363,43 @@
         let currentIterTexts = [];
         let currentIterCard = null;
         let currentIterContainer = null;
-        let currentConvContainer = null;  // wraps one full conversation in flow
+        let currentConvContainer = null;
         let isRunning = false;
+        let pendingToolCalls = {};
+        let pairSeq = 0;
+        let waitingCard = null;
+        let thinkingCard = null;
         const container = document.getElementById('chatMessages');
         const flowContent = document.getElementById('flowContent');
 
-        // ── Icons ───────────────────────────────────────
-        const ICONS = {
-            text: '💬', tool_call: '🔧', tool_result: '📝',
-            error: '❌', iteration_start: '▶', iteration_end: '⏹',
-            prompt_assembled: '📋', waiting: '⏳'
+        // ── Timeline dot color map ──
+        const DOT_COLORS = {
+            prompt_assembled: 'dot-prompt_assembled',
+            waiting: 'dot-waiting',
+            iteration_start: 'dot-iteration_start',
+            tool_call: 'dot-tool_call',
+            tool_result: 'dot-tool_result',
+            text: 'dot-text',
+            thinking: 'dot-thinking',
+            error: 'dot-error',
+            iteration_end: 'dot-iteration_end',
         };
+
+        // ── Human-readable labels ──
+        function eventLabel(type, data, details) {
+            switch (type) {
+                case 'prompt_assembled': return '📋 收到请求';
+                case 'waiting': return '⏳ 思考中...';
+                case 'iteration_start': return `🔁 迭代 #${details.loop || iterCount}`;
+                case 'iteration_end': return '';
+                case 'tool_call': return details.name || data?.name || '未知工具';
+                case 'tool_result': return (details.is_error ? '✗ ' : '✓ ') + (details.name || '');
+                case 'text': return '💬 Assistant 回复';
+                case 'thinking': return '🤔 思考过程';
+                case 'error': return '❌ ' + (details.message || String(data)).slice(0, 50);
+                default: return type;
+            }
+        }
 
         // ── Utilities ───────────────────────────────────
         function esc(t) {
@@ -325,45 +424,31 @@
             const ts = event.timestamp || '';
             const details = event.details || {};
 
-            // ── Text event: accumulate in current card ──
-            if (type === 'text' && currentIterCard) {
-                currentIterTexts.push(data);
-                const full = currentIterTexts.join('');
-                const preview = full.length > 80 ? full.slice(0,80) + '...' : full;
-                currentIterCard.querySelector('.event-preview').textContent = preview;
-                const body = currentIterCard.querySelector('.event-body');
-                body.innerHTML = `<pre>${esc(full)}</pre>`;
-                scrollFlow();
-                return;
+            // ── Remove waiting when actual output arrives ──
+            if ((type === 'text' || type === 'thinking' || type === 'iteration_start' || type === 'tool_call') && waitingCard) {
+                waitingCard.remove();
+                waitingCard = null;
             }
 
-            // Reset text accumulation
-            if (type !== 'text') {
-                currentIterTexts = [];
-                currentIterCard = null;
-            }
-
-            // ── Conversation start (prompt_assembled = first event) ──
-            if (type === 'prompt_assembled') {
+            // ── Conversation start (only first prompt_assembled) ──
+            if (type === 'prompt_assembled' && !details.is_agent_loop) {
                 convCount++;
                 const convDiv = document.createElement('div');
                 convDiv.className = 'conv-container';
                 convDiv.innerHTML = `<div class="conv-label">对话 #${convCount}</div>`;
                 flowContent.appendChild(convDiv);
                 currentConvContainer = convDiv;
-                // Fall through: add the prompt_assembled card inside this conversation
             }
 
-            // ── Iteration container ──
+            // ── Iteration start — creates the iteration container ──
             if (type === 'iteration_start') {
-                iterCount++;
+                iterCount = details.loop || (iterCount + 1);
                 document.getElementById('iterCount').textContent = iterCount;
-
                 const iterDiv = document.createElement('div');
                 iterDiv.className = 'iter-container';
                 iterDiv.innerHTML = `
                     <div class="iter-header" onclick="toggleIterContainer(this)">
-                        <span class="iter-label">迭代 #${iterCount}</span>
+                        <span class="iter-label">🔁 迭代 #${iterCount}</span>
                         <div>
                             <span class="iter-badge">0 工具</span>
                             <span class="iter-arrow">▶</span>
@@ -375,6 +460,7 @@
                 currentIterContainer = iterDiv;
                 currentIterTexts = [];
                 currentIterCard = null;
+                thinkingCard = null;
                 return;
             }
 
@@ -386,10 +472,55 @@
                 currentIterContainer = null;
                 currentIterTexts = [];
                 currentIterCard = null;
+                thinkingCard = null;
                 return;
             }
 
-            // ── Tool call: update badge ──
+            // ── Text event (final response, no tools) ──
+            if (type === 'text') {
+                const full = Array.isArray(data) ? data.join('') : data;
+                currentIterTexts.push(full);
+                const accumulated = currentIterTexts.join('');
+                if (currentIterCard) {
+                    const labelEl = currentIterCard.querySelector('.event-label');
+                    if (labelEl) labelEl.textContent = `💬 Assistant 回复 (${accumulated.length} 字符)`;
+                    const body = currentIterCard.querySelector('.event-body');
+                    body.innerHTML = `<pre>${esc(accumulated)}</pre>`;
+                } else {
+                    // Create the card
+                    const card = createTimelineCard('text', `💬 Assistant 回复`, ts,
+                        `<pre>${esc(accumulated)}</pre>`, 'text-card');
+                    appendToTarget(card);
+                    currentIterCard = card.querySelector ? card : card.lastChild;
+                    if (currentIterCard && !currentIterCard.classList?.contains('event-card')) {
+                        currentIterCard = currentIterCard.querySelector('.event-card') || null;
+                    }
+                }
+                scrollFlow();
+                return;
+            }
+
+            // ── Thinking event (text before tools in an iteration) ──
+            if (type === 'thinking') {
+                const full = Array.isArray(data) ? data.join('') : data;
+                const card = createTimelineCard('thinking', '🤔 思考过程', ts,
+                    `<pre>${esc(full)}</pre>`, 'thinking-card');
+                appendToTarget(card);
+                thinkingCard = card;
+                scrollFlow();
+                return;
+            }
+
+            // ── Waiting event (just show a pulsing card) ──
+            if (type === 'waiting') {
+                const card = createTimelineCard('waiting', '⏳ 思考中...', ts, '', 'waiting-card');
+                appendToTarget(card);
+                waitingCard = card;
+                scrollFlow();
+                return;
+            }
+
+            // ── Tool call: update badge, track for pairing ──
             if (type === 'tool_call') {
                 toolCount++;
                 document.getElementById('toolCount').textContent = toolCount;
@@ -400,53 +531,137 @@
                         badge.textContent = n + ' 工具';
                     }
                 }
+                const name = details.name || data?.name || '未知工具';
+                const inp = details.input || data?.input || {};
+                const inpStr = JSON.stringify(inp, null, 2);
+                const pairId = 'pair_' + (++pairSeq);
+                pendingToolCalls[pairId] = { name, input: inpStr };
+                return;
             }
 
+            // ── Tool result: pair with pending call ──
+            if (type === 'tool_result') {
+                const name = details.name || '';
+                const content = details.content || data || '';
+                const contentStr = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+                const isError = details.is_error || false;
+
+                const pairKeys = Object.keys(pendingToolCalls);
+                let matchedKey = null;
+                for (const k of pairKeys) {
+                    if (pendingToolCalls[k].name === name) {
+                        matchedKey = k;
+                        break;
+                    }
+                }
+
+                if (matchedKey) {
+                    const call = pendingToolCalls[matchedKey];
+                    delete pendingToolCalls[matchedKey];
+                    const pairCard = createToolPairCard(call.name, call.input, contentStr, isError);
+                    appendToTarget(pairCard);
+                } else {
+                    const card = createTimelineCard('tool_result', `${isError ? '✗' : '✓'} ${name}`, ts,
+                        `<div class="tool-pair-section"><div class="tool-pair-section-title result${isError ? ' is-error' : ''}">结果</div><pre class="${isError ? 'result-error' : 'result-ok'}">${esc(contentStr.length > 200 ? contentStr.slice(0, 200) + '...' : contentStr)}</pre></div>`,
+                        isError ? 'error-card' : '');
+                    appendToTarget(card);
+                }
+                scrollFlow();
+                return;
+            }
+
+            // ── Default: prompt_assembled, error, etc. ──
             eventCount++;
             document.getElementById('eventCount').textContent = eventCount;
 
-            const icon = ICONS[type] || '📌';
-            const preview = buildPreview(type, data, details);
+            const label = eventLabel(type, data, details);
+            const dotClass = DOT_COLORS[type] || '';
+            let extraClass = `event-${type}`;
+            if (type === 'error') extraClass += ' error-card';
 
-            const card = document.createElement('div');
-            card.className = 'event-card';
-            if (type === 'text') {
-                currentIterTexts = [data];
-                currentIterCard = card;
+            let bodyHtml = '';
+            if (type === 'prompt_assembled') {
+                bodyHtml = buildPromptBody(details, false);
+            } else if (type === 'error') {
+                bodyHtml = `<pre>${esc(details.message || String(data))}</pre>`;
             }
 
+            const card = createTimelineCard(type, label, ts, bodyHtml, extraClass);
+            appendToTarget(card);
+            scrollFlow();
+        }
+
+        function createTimelineCard(type, label, ts, bodyHtml, extraClass) {
+            const dotClass = DOT_COLORS[type] || '';
+            const card = document.createElement('div');
+            card.className = `event-card ${extraClass || ''}`;
             card.innerHTML = `
                 <div class="event-header" onclick="toggleCard(this)">
-                    <div class="event-icon icon-${esc(type)}">${icon}</div>
-                    <div class="event-info">
-                        <div class="event-type">${esc(type)}</div>
-                        <div class="event-preview">${esc(preview)}</div>
-                    </div>
-                    <div class="event-time">${esc(ts)}</div>
-                    <div class="event-arrow">▶</div>
+                    <span class="event-label">${esc(label)}</span>
+                    ${ts ? `<span class="event-time">${esc(ts)}</span>` : ''}
+                    <span class="event-arrow">▶</span>
                 </div>
-                <div class="event-body">${buildBody(type, data, details)}</div>
+                <div class="event-body">${bodyHtml}</div>
             `;
+            const timelineItem = document.createElement('div');
+            timelineItem.className = 'timeline-item';
+            timelineItem.innerHTML = `<div class="timeline-dot ${dotClass}"></div>`;
+            timelineItem.appendChild(card);
+            return timelineItem;
+        }
 
-            // Determine where to append: iteration > conversation > flowContent
-            let target;
+        function createToolPairCard(name, inputStr, contentStr, isError) {
+            const card = document.createElement('div');
+            card.className = 'tool-pair-card';
+            const statusIcon = isError ? '✗' : '✓';
+            const statusClass = isError ? 'error' : 'success';
+            card.innerHTML = `
+                <div class="tool-pair-header" onclick="togglePairCard(this)">
+                    <span class="tool-pair-icon">🔧</span>
+                    <span class="tool-pair-name">${esc(name)}</span>
+                    <span class="tool-pair-status ${statusClass}">${statusIcon}</span>
+                    <span class="tool-pair-arrow">▶</span>
+                </div>
+                <div class="tool-pair-body">
+                    <div class="tool-pair-section">
+                        <div class="tool-pair-section-title call">调用参数</div>
+                        <pre>${esc(inputStr)}</pre>
+                    </div>
+                    <div class="tool-pair-section">
+                        <div class="tool-pair-section-title result${isError ? ' is-error' : ''}">结果</div>
+                        <pre class="${isError ? 'result-error' : 'result-ok'}">${esc(contentStr)}</pre>
+                    </div>
+                </div>
+            `;
+            // Wrap in timeline
+            const timelineItem = document.createElement('div');
+            timelineItem.className = 'timeline-item';
+            const dotClass = isError ? 'dot-error' : 'dot-tool_result';
+            timelineItem.innerHTML = `<div class="timeline-dot ${dotClass}"></div>`;
+            timelineItem.appendChild(card);
+            return timelineItem;
+        }
+
+        function togglePairCard(headerEl) {
+            headerEl.parentElement.classList.toggle('open');
+        }
+
+        function appendToTarget(el) {
             if (currentIterContainer) {
-                target = currentIterContainer.querySelector('.iter-body');
+                currentIterContainer.querySelector('.iter-body').appendChild(el);
             } else if (currentConvContainer) {
-                target = currentConvContainer;
+                currentConvContainer.appendChild(el);
             } else {
-                target = flowContent;
+                flowContent.appendChild(el);
             }
-            target.appendChild(card);
-            scrollFlow();
         }
 
         // ── Toggle iteration container collapse ──
         function toggleIterContainer(headerEl) {
-            const container = headerEl.parentElement;
-            container.classList.toggle('collapsed');
+            headerEl.parentElement.classList.toggle('collapsed');
         }
 
+        // ── Build preview (kept for compatibility, not used in new flow) ──
         function buildPreview(type, data, details) {
             if (type === 'text') return '';
             if (type === 'tool_call') {
@@ -472,7 +687,6 @@
 
         function buildBody(type, data, details) {
             if (type === 'text') return `<pre>${esc(Array.isArray(data) ? data.join('') : data)}</pre>`;
-
             if (type === 'tool_call') {
                 const name = details.name || data?.name || '?';
                 const inp = details.input || data?.input || {};
@@ -482,24 +696,17 @@
                     <h4>输入参数</h4><pre>${esc(inpStr)}</pre>
                 </div>`;
             }
-
             if (type === 'tool_result') {
                 const name = details.name || '';
                 const content = details.content || data || '';
                 const isError = details.is_error || false;
-                const preview = typeof content === 'string'
-                    ? content
-                    : JSON.stringify(content, null, 2);
+                const preview = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
                 return `<div class="tool-call-detail">
                     ${name ? `<h4>结果</h4>` : ''}
                     <pre class="tool-result-body${isError?' error':''}" style="max-height:none">${esc(preview)}</pre>
                 </div>`;
             }
-
-            if (type === 'prompt_assembled') {
-                return buildPromptBody(details, false);
-            }
-
+            if (type === 'prompt_assembled') return buildPromptBody(details, false);
             return `<pre>${esc(typeof data === 'object' ? JSON.stringify(data, null, 2) : data)}</pre>`;
         }
 
@@ -559,16 +766,11 @@
             const msgs = details.messages || [];
             const tools = details.tools || [];
             const systemReminders = details.system_reminders || [];
-
             let html = `<div class="prompt-detail">`;
-
-            // System Prompt - COLLAPSED by default
             html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
                 <div class="prompt-section-title"><span class="collapse-icon">▶</span>System Prompt <span style="color:#4a5568;font-weight:400">(${sys.length}c)</span></div>
                 <pre>${esc(sys || '(none)')}</pre>
             </div>`;
-
-            // System Reminders - COLLAPSED by default (separate section)
             if (systemReminders.length > 0) {
                 html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
                     <div class="prompt-section-title"><span class="collapse-icon">▶</span>System Reminders (${systemReminders.length})</div>`;
@@ -580,8 +782,6 @@
                 }
                 html += `</div>`;
             }
-
-            // Messages
             const msgSectionClass = msgs.length > 3 ? 'collapsed' : '';
             html += `<div class="prompt-section ${msgSectionClass}" onclick="toggleSection(this)">
                 <div class="prompt-section-title"><span class="collapse-icon">▶</span>Messages (${msgs.length})</div>`;
@@ -593,10 +793,7 @@
                     const content = m.content_array || m.content;
                     if (Array.isArray(content)) {
                         for (const item of content) {
-                            if (item.type === 'system-reminder') {
-                                // Skip in messages — shown in System Reminders section above
-                                continue;
-                            }
+                            if (item.type === 'system-reminder') continue;
                             if (item.type === 'tool_use') {
                                 const toolInput = typeof item.input === 'string' ? item.input : JSON.stringify(item.input, null, 2);
                                 html += buildToolCallBlock(item.name, toolInput, null);
@@ -616,8 +813,6 @@
                 }
             }
             html += `</div>`;
-
-            // Tools - COLLAPSED by default
             html += `<div class="prompt-section collapsed" onclick="toggleSection(this)">
                 <div class="prompt-section-title"><span class="collapse-icon">▶</span>Tools (${tools.length})</div>`;
             if (tools.length === 0) {
@@ -631,16 +826,13 @@
                 html += `</div>`;
             }
             html += `</div></div>`;
-
             return html;
         }
 
         function toggleSection(el) {
             el.classList.toggle('collapsed');
             const icon = el.querySelector('.collapse-icon');
-            if (icon) {
-                icon.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
-            }
+            if (icon) icon.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
         }
 
         function toggleCard(header) {
@@ -651,9 +843,75 @@
         }
 
         function scrollFlow() {
-            if (autoScroll) {
-                flowContent.scrollTop = flowContent.scrollHeight;
-            }
+            if (autoScroll) flowContent.scrollTop = flowContent.scrollHeight;
+        }
+
+        // ── Simple Markdown renderer ────────────────────
+        function renderMd(md) {
+            if (!md) return '';
+            let h = md;
+            // Code blocks (fenced)
+            h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+                return `<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`;
+            });
+            // Inline code (must come after code blocks)
+            h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+            // Headers
+            h = h.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+            h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+            h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+            h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+            // Horizontal rule
+            h = h.replace(/^[-*_]{3,}$/gm, '<hr>');
+            // Bold + Italic
+            h = h.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            // Bold
+            h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Italic
+            h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            // Links
+            h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            // Blockquotes
+            h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+            // Fix: input is raw markdown, not escaped — use literal >
+            h = h.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+            // Unordered lists
+            h = h.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+            // Ordered lists
+            h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+            // Wrap consecutive <li> in <ul>
+            h = h.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+            // Merge adjacent blockquotes
+            h = h.replace(/(<\/blockquote>)\s*(<blockquote>)/g, '<br>$1 $2');
+            // Tables — parse line by line
+            h = h.split('\n').reduce((acc, line, i, lines) => {
+                if (/^\|/.test(line) && i + 1 < lines.length && /^\|[\s\-:|]+\|/.test(lines[i + 1])) {
+                    // Found a table header — collect all table lines
+                    const thParts = line.split('|').filter(c => c.trim());
+                    const ths = thParts.map(c => `<th>${esc(c.trim())}</th>`).join('');
+                    let rows = '';
+                    let j = i + 2;
+                    while (j < lines.length && /^\|/.test(lines[j])) {
+                        const tds = lines[j].split('|').filter(c => c.trim()).map(c => `<td>${esc(c.trim())}</td>`).join('');
+                        rows += `<tr>${tds}</tr>`;
+                        j++;
+                    }
+                    acc += `<table><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>\n`;
+                    // Skip consumed lines
+                    for (let k = i + 1; k < j; k++) lines[k] = null;
+                } else if (line !== null) {
+                    acc += line + '\n';
+                }
+                return acc;
+            }, '');
+            // Paragraphs: wrap remaining non-empty, non-block lines
+            h = h.replace(/^(?!<(?:pre|ul|ol|li|blockquote|h[1-6]|table|hr|div|code|tr|td|th|thead|tbody))([^\n]+)$/gm, (match) => {
+                if (match.trim() === '') return '';
+                return `<p>${match}</p>`;
+            });
+            // Clean up empty paragraphs
+            h = h.replace(/<p>\s*<\/p>/g, '');
+            return h;
         }
 
         // ── Chat: add message ──────────────────────────
@@ -661,9 +919,10 @@
             const div = document.createElement('div');
             div.className = `msg ${role}`;
             const roleLabel = role === 'user' ? 'You' : 'Assistant';
+            const rendered = role === 'assistant' ? renderMd(content) : esc(content).replace(/\n/g, '<br>');
             div.innerHTML = `
                 <div class="role">${roleLabel}</div>
-                <pre>${esc(content)}</pre>
+                <div class="msg-body">${rendered}</div>
                 <div class="ts">${new Date().toLocaleTimeString()}</div>
             `;
             container.appendChild(div);
@@ -681,6 +940,10 @@
             currentIterCard = null;
             currentIterContainer = null;
             currentConvContainer = null;
+            pendingToolCalls = {};
+            pairSeq = 0;
+            waitingCard = null;
+            thinkingCard = null;
         }
 
         // ── Send message ────────────────────────────────
