@@ -8,7 +8,7 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; overflow: hidden; }
-        body { background: #0a0e14; display: flex; flex-direction: column; }
+        body { background: #0a0e14; display: flex; flex-direction: column; min-width: 320px; }
         .header { height: 40px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; align-items: center; padding: 0 15px; flex-shrink: 0; }
         .header h1 { font-size: 15px; color: #79c0ff; font-weight: 700; letter-spacing: 0.5px; }
         .header-info { margin-left: auto; font-size: 13px; color: #8b949e; }
@@ -16,8 +16,8 @@
         .tab-btn { padding: 4px 12px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 5px; font-size: 12px; text-decoration: none; transition: all 0.2s; }
         .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
         .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-        .terminal-panel { flex: 0 0 40%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 300px; height: 100%; position: relative; }
-        .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 300px; height: 100%; }
+        .terminal-panel { flex: 0 0 40%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 200px; height: 100%; position: relative; }
+        .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 200px; height: 100%; }
         .panel-header { padding: 10px 15px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .panel-title { font-size: 14px; color: #e6edf3; font-weight: 600; }
         .captured-count { background: #e8870a; color: #0a0e14; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; font-weight: 700; }
@@ -118,6 +118,25 @@
         .tool-option[data-tool="claude"] .tool-dot { background: #56d364; }
         .tool-option[data-tool="opencode"] .tool-dot { background: #d2a8ff; }
         .tool-option:not(.active) .tool-dot { opacity: 0.4; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .main { flex-direction: column; }
+            .terminal-panel { flex: 1 1 55% !important; border-right: none; border-bottom: 1px solid #2a3040; min-width: unset; }
+            .captured-panel { flex: 1 1 45% !important; min-width: unset; }
+            .header { height: auto; min-height: 36px; flex-wrap: wrap; padding: 6px 12px; gap: 6px; }
+            .header h1 { font-size: 13px; }
+            .tool-option { padding: 3px 8px; font-size: 11px; }
+            .panel-title { font-size: 12px; }
+        }
+        @media (max-width: 600px) {
+            .main { flex-direction: column; }
+            .terminal-panel { flex: 1 1 60% !important; }
+            .captured-panel { flex: 1 1 40% !important; }
+            .header-info { font-size: 11px; }
+            .header h1 { font-size: 12px; }
+            .tab-btn { padding: 3px 8px; font-size: 11px; }
+        }
     </style>
 </head>
 <body>
