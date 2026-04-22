@@ -298,64 +298,59 @@ def chat_completions():
 
         target_url = f"{config['base_url']}/v1/messages"
 
+        # DashScope Anthropic endpoint doesn't support real streaming.
+        # Always use non-streaming, then convert to requested format.
+        anthropic_req["stream"] = False
+        resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
+        result = resp.json()
+        resp.close()
+
+        # Convert Anthropic response to OpenAI format
+        content = ""
+        tool_calls = []
+        for block in result.get("content", []):
+            if block.get("type") == "text":
+                content = block["text"]
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block["id"],
+                    "type": "function",
+                    "function": {"name": block["name"], "arguments": json.dumps(block.get("input", {}))},
+                })
+
+        message = {"role": "assistant", "content": content or None}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+
+        openai_resp = {
+            "id": result.get("id", "msg_0"),
+            "object": "chat.completion",
+            "created": int(datetime.now().timestamp()),
+            "model": config.get("model", "unknown"),
+            "choices": [{"message": message, "finish_reason": result.get("stop_reason", "stop"), "index": 0}],
+        }
+        if "usage" in result:
+            openai_resp["usage"] = result["usage"]
+
+        # If client requested streaming, return as SSE
         if req_data.get("stream", False):
-            resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
-            ct = resp.headers.get("content-type", "")
-            content_data = resp.content
-            resp.close()
+            def convert_to_sse():
+                # Start: assistant role
+                yield f"data: {json.dumps({'id': openai_resp['id'], 'object': 'chat.completion.chunk', 'model': openai_resp['model'], 'choices': [{'delta': {'role': 'assistant'}, 'index': 0, 'finish_reason': None}]})}\n\n"
+                # Content
+                if content:
+                    yield f"data: {json.dumps({'id': openai_resp['id'], 'object': 'chat.completion.chunk', 'model': openai_resp['model'], 'choices': [{'delta': {'content': content}, 'index': 0, 'finish_reason': None}]})}\n\n"
+                # Tool calls
+                if tool_calls:
+                    for i, tc in enumerate(tool_calls):
+                        yield f"data: {json.dumps({'id': openai_resp['id'], 'object': 'chat.completion.chunk', 'model': openai_resp['model'], 'choices': [{'delta': {'tool_calls': [{'index': i, 'id': tc['id'], 'type': 'function', 'function': {'name': tc['function']['name'], 'arguments': tc['function']['arguments']}}]}, 'index': 0, 'finish_reason': None}]})}\n\n"
+                # Done
+                finish = openai_resp['choices'][0]['finish_reason']
+                yield f"data: {json.dumps({'id': openai_resp['id'], 'object': 'chat.completion.chunk', 'model': openai_resp['model'], 'choices': [{'delta': {}, 'index': 0, 'finish_reason': finish}]})}\n\n"
+                yield "data: [DONE]\n\n"
 
-            if "text/event-stream" in ct:
-                # Convert Anthropic SSE to OpenAI SSE format
-                def convert_stream():
-                    for line in content_data.decode("utf-8", errors="replace").split("\n"):
-                        if not line.startswith("data: "):
-                            continue
-                        raw = line[6:].strip()
-                        if not raw or raw == "[DONE]":
-                            continue
-                        try:
-                            evt = json.loads(raw)
-                            evt_type = evt.get("type", "")
-                            if evt_type == "content_block_delta":
-                                delta_text = evt.get("delta", {}).get("text", "")
-                                if delta_text:
-                                    yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_text}, 'index': 0}]})}\n\n"
-                            elif evt_type == "content_block_start":
-                                content_block = evt.get("content_block", {})
-                                if content_block.get("type") == "tool_use":
-                                    tool_name = content_block.get("name", "")
-                                    tool_id = content_block.get("id", "")
-                                    yield f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': tool_id, 'type': 'function', 'function': {'name': tool_name, 'arguments': ''}}]}, 'index': 0}]})}\n\n"
-                            elif evt_type == "message_stop":
-                                yield "data: [DONE]\n\n"
-                        except Exception:
-                            pass
-
-                return Response(convert_stream(), mimetype="text/event-stream")
-            else:
-                return Response(content_data, mimetype="text/event-stream")
+            return Response(convert_to_sse(), mimetype="text/event-stream")
         else:
-            resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
-            result = resp.json()
-            resp.close()
-
-            # Convert Anthropic response to OpenAI format
-            content = ""
-            tool_calls = []
-            for block in result.get("content", []):
-                if block.get("type") == "text":
-                    content = block["text"]
-                elif block.get("type") == "tool_use":
-                    tool_calls.append({
-                        "id": block["id"],
-                        "type": "function",
-                        "function": {"name": block["name"], "arguments": json.dumps(block.get("input", {}))},
-                    })
-
-            message = {"role": "assistant", "content": content or None}
-            if tool_calls:
-                message["tool_calls"] = tool_calls
-
-            return {"choices": [{"message": message, "finish_reason": result.get("stop_reason", "stop"), "index": 0}]}
+            return openai_resp
     except Exception as e:
         return {"error": str(e)}, 500
