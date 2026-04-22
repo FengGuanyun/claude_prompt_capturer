@@ -86,11 +86,11 @@ async def _build_opencode_config():
     for prov in oc.get("provider", {}).values():
         opts = prov.get("options", {})
         if opts and "baseURL" in opts:
-            opts["baseURL"] = "http://localhost:8080/apps/anthropic"
+            opts["baseURL"] = "http://localhost:8080/v1"
         for mod in prov.get("models", {}).values():
             mod_opts = mod.get("options", {})
             if mod_opts and "baseURL" in mod_opts:
-                mod_opts["baseURL"] = "http://localhost:8080/apps/anthropic"
+                mod_opts["baseURL"] = "http://localhost:8080/v1"
 
     oc.pop("$schema", None)
 
