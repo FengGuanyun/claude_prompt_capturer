@@ -91,6 +91,33 @@
         .status.success { color: #56d364; }
         .status.error { color: #f85149; }
         .empty-state { color: #4a5568; text-align: center; padding: 40px; font-size: 13px; line-height: 1.8; }
+
+        /* ── Tool Switcher (segmented control) ── */
+        .tool-switcher { display: flex; align-items: center; gap: 0; margin-left: auto; margin-right: 10px; background: #0d1117; border: 1px solid #2a3040; border-radius: 8px; padding: 2px; }
+        .tool-option {
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #8b949e;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .tool-option:hover { color: #c9d1d9; }
+        .tool-option.active { background: #1a3050; color: #79c0ff; }
+        .tool-option[data-tool="opencode"].active { background: #2a1a40; color: #d2a8ff; }
+        .tool-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .tool-option[data-tool="claude"] .tool-dot { background: #56d364; }
+        .tool-option[data-tool="opencode"] .tool-dot { background: #d2a8ff; }
+        .tool-option:not(.active) .tool-dot { opacity: 0.4; }
     </style>
 </head>
 <body>
@@ -99,10 +126,14 @@
         <div class="tab-bar">
             <a href="/agent" class="tab-btn" title="Agent Demo">🤖 Agent</a>
         </div>
-        <select id="toolSelector" style="margin-left: auto; margin-right: 10px; background: #2a4a20; color: #56d364; border: 2px solid #56d364; border-radius: 6px; padding: 4px 12px; font-size: 13px; font-weight: 600; cursor: pointer;" title="Select AI tool">
-            <option value="claude">Claude Code</option>
-            <option value="opencode">OpenCode</option>
-        </select>
+        <div class="tool-switcher" id="toolSwitcher">
+            <div class="tool-option active" data-tool="claude" onclick="switchTool('claude')">
+                <span class="tool-dot"></span>Claude
+            </div>
+            <div class="tool-option" data-tool="opencode" onclick="switchTool('opencode')">
+                <span class="tool-dot"></span>OpenCode
+            </div>
+        </div>
         <div class="header-info" id="modelInfo">Loading...</div>
     </div>
 
@@ -136,26 +167,39 @@
             document.getElementById('modelInfo').textContent = cfg.model + ' @ ' + new URL(cfg.base_url).hostname;
         });
 
-        // Load available tools (preserve hardcoded options as fallback)
+        // Load available tools (dynamic)
         fetch('/tools').then(r => r.json()).then(data => {
             if (data && data.available && data.available.length > 0) {
-                const sel = document.getElementById('toolSelector');
-                sel.innerHTML = '';
+                const switcher = document.getElementById('toolSwitcher');
+                switcher.innerHTML = '';
                 data.available.forEach(t => {
-                    const opt = document.createElement('option');
-                    opt.value = t;
-                    opt.textContent = t === 'claude' ? 'Claude Code' : 'OpenCode';
-                    if (t === data.default) opt.selected = true;
-                    sel.appendChild(opt);
+                    const opt = document.createElement('div');
+                    opt.className = 'tool-option' + (t === data.default ? ' active' : '');
+                    opt.dataset.tool = t;
+                    opt.onclick = () => switchTool(t);
+                    const dot = document.createElement('span');
+                    dot.className = 'tool-dot';
+                    opt.appendChild(dot);
+                    opt.appendChild(document.createTextNode(t === 'claude' ? 'Claude' : t));
+                    switcher.appendChild(opt);
                 });
             }
         }).catch(() => { /* keep hardcoded options */ });
 
-        // Tool selector: reconnect on change
-        document.getElementById('toolSelector').addEventListener('change', () => {
+        // Get current selected tool
+        function getSelectedTool() {
+            const active = document.querySelector('#toolSwitcher .tool-option.active');
+            return active ? active.dataset.tool : 'claude';
+        }
+
+        // Switch tool and reconnect
+        function switchTool(tool) {
+            document.querySelectorAll('#toolSwitcher .tool-option').forEach(el => {
+                el.classList.toggle('active', el.dataset.tool === tool);
+            });
             if (ws) ws.close();
             connect();
-        });
+        }
 
         function initTerminal() {
             term = new Terminal({
@@ -190,7 +234,7 @@
 
         function connect() {
             const sid = getSessionId();
-            const tool = document.getElementById('toolSelector').value || 'claude';
+            const tool = getSelectedTool();
             // Connect to the WebSocket PTY server on port 8081
             const wsUrl = `ws://localhost:8081/ws?tool=${tool}` + (sid ? '&session_id=' + sid : '');
             ws = new WebSocket(wsUrl);
