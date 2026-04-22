@@ -16,8 +16,10 @@
         .tab-btn { padding: 4px 12px; background: transparent; border: 1px solid #2a3040; color: #8b949e; cursor: pointer; border-radius: 5px; font-size: 12px; text-decoration: none; transition: all 0.2s; }
         .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
         .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
-        .terminal-panel { flex: 0 0 40%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 200px; height: 100%; position: relative; }
-        .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 200px; height: 100%; }
+        .terminal-panel { flex: 0 0 40%; display: flex; flex-direction: column; min-width: 320px; height: 100%; position: relative; }
+        .resize-handle { width: 5px; cursor: col-resize; background: #1a2030; transition: background 0.15s; flex-shrink: 0; z-index: 50; }
+        .resize-handle:hover, .resize-handle.active { background: #79c0ff; }
+        .captured-panel { flex: 1; display: flex; flex-direction: column; background: #0a0e14; min-width: 320px; height: 100%; border-left: 1px solid #2a3040; }
         .panel-header { padding: 10px 15px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .panel-title { font-size: 14px; color: #e6edf3; font-weight: 600; }
         .captured-count { background: #e8870a; color: #0a0e14; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; font-weight: 700; }
@@ -124,6 +126,7 @@
             .main { flex-direction: column; }
             .terminal-panel { flex: 1 1 55% !important; border-right: none; border-bottom: 1px solid #2a3040; min-width: unset; }
             .captured-panel { flex: 1 1 45% !important; min-width: unset; }
+            .resize-handle { display: none; }
             .header { height: auto; min-height: 36px; flex-wrap: wrap; padding: 6px 12px; gap: 6px; }
             .header h1 { font-size: 13px; }
             .tool-option { padding: 3px 8px; font-size: 11px; }
@@ -157,10 +160,12 @@
     </div>
 
     <div class="main">
-        <div class="terminal-panel">
+        <div class="terminal-panel" id="terminalPanel">
             <div id="terminal-container"></div>
             <div class="status" id="status">Connecting...</div>
         </div>
+
+        <div class="resize-handle" id="resizeHandle"></div>
 
         <div class="captured-panel">
             <div class="panel-header">
@@ -279,8 +284,8 @@
         function connect() {
             const sid = getSessionId();
             const tool = getSelectedTool();
-            // Connect to the WebSocket PTY server on port 8081
-            const wsUrl = `ws://localhost:8081/ws?tool=${tool}` + (sid ? '&session_id=' + sid : '');
+            // Connect to the WebSocket PTY server on port 5001
+            const wsUrl = `ws://localhost:5001/ws?tool=${tool}` + (sid ? '&session_id=' + sid : '');
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -635,6 +640,49 @@
 
         // Auto-refresh captured list
         setInterval(loadCaptured, 2000);
+
+        // ── Resizable split panel ──
+        const terminalPanel = document.getElementById('terminalPanel');
+        const resizeHandle = document.getElementById('resizeHandle');
+        let isResizing = false;
+        const STORAGE_KEY = 'terminalPanelWidth';
+
+        function restoreWidth() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                terminalPanel.style.flex = `0 0 ${saved}px`;
+            }
+        }
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizeHandle.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const main = document.querySelector('.main');
+            const rect = main.getBoundingClientRect();
+            let w = e.clientX - rect.left;
+            w = Math.max(320, Math.min(rect.width - 320, w));
+            terminalPanel.style.flex = `0 0 ${w}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isResizing) return;
+            isResizing = false;
+            resizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            const rect = terminalPanel.getBoundingClientRect();
+            localStorage.setItem(STORAGE_KEY, Math.round(rect.width).toString());
+            if (term) term.fit();
+        });
+
+        restoreWidth();
 
         initTerminal();
         connect();

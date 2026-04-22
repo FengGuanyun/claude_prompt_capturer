@@ -16,14 +16,14 @@ def main():
     ws_port = _start_ws_handler(app)
 
     print("=" * 50)
-    print("Unified Server — Port 8080")
+    print("Unified Server — Port 5000")
     print("=" * 50)
-    print(f"\nHome (Terminal):  http://localhost:8080")
-    print(f"Agent:            http://localhost:8080/agent")
+    print(f"\nHome (Terminal):  http://localhost:5000")
+    print(f"Agent:            http://localhost:5000/agent")
     print(f"WebSocket PTY:    ws://localhost:{ws_port}")
     print("\n" + "=" * 50)
 
-    app.run(host="0.0.0.0", port=8080, threaded=True)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
 
 if __name__ == "__main__":
     main()

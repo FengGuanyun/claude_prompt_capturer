@@ -178,7 +178,7 @@ def proxy_to_api(base_url_path: str | None = None):
 
         try:
             # Disable SSL verification for local development (DashScope SSL issues in some networks)
-            resp = httpx.post(target_url, content=body, headers=headers, timeout=120, verify=False)
+            resp = httpx.post(target_url, content=body, headers=headers, timeout=120, verify=False, trust_env=False)
             ct = resp.headers.get("content-type", "")
             content_data = resp.content
             resp.close()
@@ -300,7 +300,7 @@ def chat_completions():
         # DashScope Anthropic endpoint doesn't support real streaming.
         # Always use non-streaming, then convert to requested format.
         anthropic_req["stream"] = False
-        resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
+        resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120, trust_env=False)
         result = resp.json()
         resp.close()
 

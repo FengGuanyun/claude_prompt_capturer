@@ -1,4 +1,4 @@
-"""WebSocket PTY handler — runs on port 8081, bridges browser ↔ PTY ↔ Claude/OpenCode."""
+"""WebSocket PTY handler — runs on port 5001, bridges browser ↔ PTY ↔ Claude/OpenCode."""
 
 import asyncio
 import json
@@ -29,7 +29,7 @@ def start_ws_handler(flask_app):
     import websockets
     import socket
 
-    ws_port = 8081
+    ws_port = 5001
 
     # Start the websockets server in a background thread
     def _run_server():
@@ -76,7 +76,7 @@ async def _build_opencode_config():
     global_config = Path.home() / ".config" / "opencode" / "opencode.json"
     if global_config.exists():
         try:
-            with open(global_config) as f:
+            with open(global_config, encoding="utf-8-sig") as f:
                 oc = json.load(f)
         except Exception:
             oc = {}
@@ -86,11 +86,11 @@ async def _build_opencode_config():
     for prov in oc.get("provider", {}).values():
         opts = prov.get("options", {})
         if opts and "baseURL" in opts:
-            opts["baseURL"] = "http://localhost:8080/v1"
+            opts["baseURL"] = "http://localhost:5000/v1"
         for mod in prov.get("models", {}).values():
             mod_opts = mod.get("options", {})
             if mod_opts and "baseURL" in mod_opts:
-                mod_opts["baseURL"] = "http://localhost:8080/v1"
+                mod_opts["baseURL"] = "http://localhost:5000/v1"
 
     oc.pop("$schema", None)
 
@@ -105,7 +105,7 @@ def _build_claude_proxy_settings(config: dict):
     proxy_settings = {
         "env": {
             "ANTHROPIC_AUTH_TOKEN": config["api_key"],
-            "ANTHROPIC_BASE_URL": "http://localhost:8080",
+            "ANTHROPIC_BASE_URL": "http://localhost:5000",
             "ANTHROPIC_MODEL": config["model"]
         }
     }
