@@ -209,6 +209,9 @@ def chat_completions():
         raw_messages = req_data.get("messages", [])
         raw_tools = req_data.get("tools", [])
         raw_system = [m.get("content", "") for m in raw_messages if m.get("role") == "system"]
+        raw_model = req_data.get("model", config.get("model", "unknown"))
+        if "/" in raw_model:
+            raw_model = raw_model.split("/", 1)[1]
         parsed_msgs = []
         for msg in raw_messages:
             content = msg.get("content", "")
@@ -220,7 +223,7 @@ def chat_completions():
             })
         capture_entry = {
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
-            "model": config.get("model", "unknown"),
+            "model": raw_model,
             "system_prompt": "\n".join(raw_system) if raw_system else "",
             "system_tokens": 0,
             "system_reminders": [],
