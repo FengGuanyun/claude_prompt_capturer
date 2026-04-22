@@ -3,6 +3,7 @@
 统一的 Claude Code / OpenCode 代理服务，支持 Prompt 捕获、WebSocket PTY 终端和 Agent 执行流程可视化。
 
 > 跨平台：支持 Windows (winpty)、Mac/Linux (pty)，自动检测系统选择 PTY 实现。
+<img width="3011" height="1298" alt="image" src="https://github.com/user-attachments/assets/f62a8d94-5990-4590-ae5c-455613cb1488" />
 
 ## 功能
 
