@@ -2,6 +2,8 @@
 
 统一的 Claude Code / OpenCode 代理服务，支持 Prompt 捕获、WebSocket PTY 终端和 Agent 执行流程可视化。
 
+> 跨平台：支持 Windows (winpty)、Mac/Linux (pty)，自动检测系统选择 PTY 实现。
+
 ## 功能
 
 - **Prompt 捕获**：拦截所有 API 请求，在网页上查看完整的 Prompt、消息历史和工具调用
@@ -15,9 +17,14 @@
 
 ```bash
 pip install flask flask-cors httpx websockets
-# Windows 需要 winpty
-pip install pywinpty
 ```
+
+**平台依赖：**
+
+| 平台 | PTY 实现 | 额外依赖 |
+|------|----------|----------|
+| Windows | winpty | `pip install pywinpty` |
+| Mac / Linux | 标准 pty | 无（Python 内置） |
 
 ### 2. 配置 API Key
 
@@ -61,6 +68,16 @@ python unified_server.py
 ├── mini-cc/                   # 参考的 mini-cc Agent 代码（未直接引用）
 └── apps/                      # 用户生成文件目录
 ```
+
+## 平台兼容性
+
+| 组件 | Windows | Mac / Linux |
+|------|---------|-------------|
+| PTY 终端 | ✅ winpty | ✅ pty (内置) |
+| Claude Code | ✅ | ✅ |
+| OpenCode | ✅ | ✅ |
+| Agent 对话 | ✅ | ✅ |
+| API 代理 | ✅ | ✅ |
 
 ## 架构
 
