@@ -231,7 +231,7 @@ def agent_chat():
                     full_content = ''
                     tool_calls = []
 
-                    async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with httpx.AsyncClient(timeout=120.0, trust_env=False, verify=False) as client:
                         resp = await client.post(
                             base_url + "/v1/messages",
                             json=anthropic_request,

@@ -22,7 +22,7 @@
         .tab-btn:hover { background: #1a2030; color: #c9d1d9; border-color: #4a5568; }
         .tab-btn.active { background: #1a3a5c; color: #79c0ff; border-color: #79c0ff; }
 
-        /* ── 3-column layout ── */
+        /* ── 2-column layout ── */
         .main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
         /* Left: Chat */
@@ -56,7 +56,7 @@
         .send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
 
         /* Middle: Flow Timeline */
-        .flow-panel { flex: 0 0 38%; display: flex; flex-direction: column; border-right: 1px solid #2a3040; min-width: 220px; background: #0a0e14; }
+        .flow-panel { flex: 1; display: flex; flex-direction: column; min-width: 220px; background: #0a0e14; }
         .flow-header { padding: 10px 14px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .flow-header h2 { font-size: 13px; color: #79c0ff; font-weight: 600; }
         .flow-actions { display: flex; gap: 6px; }
@@ -121,32 +121,6 @@
         .prompt-section.collapsed > pre { display: none; }
         .prompt-section.collapsed > .tools-list { display: none; }
         .prompt-section.collapsed > .msg-item { display: none; }
-
-        /* Right: Prompt Preview Panel */
-        .detail-panel { flex: 1; display: flex; flex-direction: column; min-width: 220px; background: #0a0e14; }
-        .detail-header { padding: 10px 14px; background: #111620; border-bottom: 1px solid #2a3040; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-        .detail-header h2 { font-size: 13px; color: #d2a8ff; font-weight: 600; }
-        .detail-content { flex: 1; overflow-y: auto; padding: 10px; }
-        .detail-empty { text-align: center; color: #4a5568; padding: 40px 20px; font-size: 12px; line-height: 1.8; }
-        .detail-section { margin-bottom: 14px; }
-        .detail-section-title { font-size: 10px; color: #e8870a; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
-        .detail-section pre { background: #0d1117; border: 1px solid #1e2530; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #c9d1d9; max-height: 120px; overflow-y: auto; }
-        .detail-section .msg-item { margin-bottom: 6px; padding: 6px 8px; background: #0d1117; border: 1px solid #1e2530; border-radius: 4px; }
-        .detail-section .msg-role { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 3px; }
-        .detail-section .msg-role.user { color: #56d364; }
-        .detail-section .msg-role.assistant { color: #79c0ff; }
-        .detail-section .msg-role.system { color: #d2a8ff; }
-        .detail-section .msg-role.tool { color: #e8870a; }
-        .detail-section .msg-role.tool_result { color: #e8870a; }
-        .detail-section .msg-body { font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
-        .detail-section .tools-grid { display: flex; flex-wrap: wrap; gap: 4px; }
-        .detail-section .tool-tag { background: #1a2030; border: 1px solid #2a3040; padding: 2px 8px; border-radius: 10px; font-size: 10px; color: #d2a8ff; }
-        .detail-section-title { cursor: pointer; user-select: none; }
-        .detail-section-title:hover { color: #e0c0ff; }
-        .detail-section .collapse-icon { font-size: 10px; margin-right: 4px; transition: transform 0.2s; display: inline-block; }
-        .detail-section.collapsed > pre,
-        .detail-section.collapsed > .tools-grid,
-        .detail-section.collapsed > .msg-item { display: none; }
 
         /* Tool call block — expandable */
         .tool-call-block { margin: 6px 0; border: 1px solid #1a3a5c; border-radius: 4px; overflow: hidden; }
@@ -226,26 +200,22 @@
         /* ── Responsive ── */
         @media (max-width: 1200px) {
             .chat-panel { flex: 0 0 32% !important; min-width: 240px !important; }
-            .flow-panel { flex: 0 0 34% !important; min-width: 240px !important; }
-            .detail-panel { min-width: 200px !important; }
         }
         @media (max-width: 900px) {
             .main { flex-direction: column; }
             .chat-panel {
                 flex: 0 0 auto !important;
-                max-height: 40vh;
+                max-height: 45vh;
                 border-right: none !important;
                 border-bottom: 1px solid #2a3040;
                 min-width: unset !important;
             }
             .flow-panel {
-                flex: 0 0 auto !important;
-                max-height: 35vh;
+                flex: 1 1 auto !important;
+                max-height: none !important;
                 border-right: none !important;
-                border-bottom: 1px solid #2a3040;
                 min-width: unset !important;
             }
-            .detail-panel { flex: 1 1 auto !important; min-width: unset !important; }
             .header { height: auto; min-height: 40px; flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
             .header h1 { font-size: 13px; }
             .header-info { font-size: 11px; gap: 10px; }
@@ -283,8 +253,7 @@
                 <div class="msg-empty">
                     输入消息开始体验 Agent 编程助手。<br>
                     左侧：对话记录<br>
-                    中间：执行流程时间线<br>
-                    右侧：当前 Prompt 组装详情
+                    右侧：执行流程时间线
                 </div>
             </div>
             <div class="input-area">
@@ -293,7 +262,7 @@
             </div>
         </div>
 
-        <!-- Middle: Flow Timeline -->
+        <!-- Right: Flow Timeline -->
         <div class="flow-panel">
             <div class="flow-header">
                 <h2>执行流程</h2>
@@ -304,16 +273,6 @@
             </div>
             <div class="flow-content" id="flowContent">
                 <div class="flow-empty">等待开始...</div>
-            </div>
-        </div>
-
-        <!-- Right: Prompt Detail -->
-        <div class="detail-panel">
-            <div class="detail-header">
-                <h2>Prompt 组装详情</h2>
-            </div>
-            <div class="detail-content" id="detailContent">
-                <div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>
             </div>
         </div>
     </div>
@@ -328,7 +287,6 @@
         // ── State ──────────────────────────────────────
         let iterCount = 0, toolCount = 0, eventCount = 0, convCount = 0;
         let autoScroll = true;
-        let selectedEvent = null;
         let currentIterTexts = [];
         let currentIterCard = null;
         let currentIterContainer = null;
@@ -336,7 +294,6 @@
         let isRunning = false;
         const container = document.getElementById('chatMessages');
         const flowContent = document.getElementById('flowContent');
-        const detailContent = document.getElementById('detailContent');
 
         // ── Icons ───────────────────────────────────────
         const ICONS = {
@@ -689,111 +646,8 @@
         function toggleCard(header) {
             const card = header.parentElement;
             const wasOpen = card.classList.contains('open');
-            // Close all
             document.querySelectorAll('.event-card.open').forEach(c => c.classList.remove('open'));
-            if (!wasOpen) {
-                card.classList.add('open');
-                // Show in detail panel
-                const event = card._event;
-                if (event && event.type === 'prompt_assembled') {
-                    renderDetailPanel(event.details || {});
-                }
-            } else {
-                if (detailContent) {
-                    detailContent.innerHTML = `<div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>`;
-                }
-            }
-        }
-
-        // ── Right panel: Prompt detail ──────────────────
-        function renderDetailPanel(details) {
-            const sys = details.system_prompt || '';
-            const msgs = details.messages || [];
-            const tools = details.tools || [];
-            const systemReminders = details.system_reminders || [];
-
-            let html = '';
-
-            // System - COLLAPSED by default
-            html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
-                <div class="detail-section-title"><span class="collapse-icon">▶</span>System Prompt <span style="color:#4a5568;font-weight:400">(${sys.length}c)</span></div>
-                <pre>${esc(sys || '(none)')}</pre>
-            </div>`;
-
-            // System Reminders - COLLAPSED by default (separate section)
-            if (systemReminders.length > 0) {
-                html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
-                    <div class="detail-section-title"><span class="collapse-icon">▶</span>System Reminders (${systemReminders.length})</div>`;
-                for (const reminder of systemReminders) {
-                    html += `<div class="msg-item" style="border-color:#d2a8ff;">
-                        <div class="msg-role" style="color:#d2a8ff;">SYSTEM-REMINDER</div>
-                        <div class="msg-body">${esc(reminder.slice(0, 300) + (reminder.length > 300 ? '...' : ''))}</div>
-                    </div>`;
-                }
-                html += `</div>`;
-            }
-
-            // Messages - always expanded in detail panel for visibility
-            html += `<div class="detail-section">`;
-            html += `<div class="detail-section-title" style="cursor:default;">Messages (${msgs.length})</div>`;
-            if (msgs.length === 0) {
-                html += `<pre>(none)</pre>`;
-            } else {
-                for (const m of msgs.slice(-6)) {
-                    const rawRole = m.role || 'unknown';
-                    const content = m.content_array || m.content;
-                    if (Array.isArray(content)) {
-                        for (const item of content) {
-                            if (item.type === 'system-reminder') {
-                                continue;
-                            }
-                            if (item.type === 'tool_use') {
-                                const toolInput = typeof item.input === 'string' ? item.input : JSON.stringify(item.input, null, 2);
-                                html += buildToolCallBlock(item.name, toolInput, null);
-                            } else if (item.type === 'tool_result') {
-                                const resultContent = typeof item.content === 'string' ? item.content : JSON.stringify(item.content, null, 2);
-                                html += buildToolResultBlock(resultContent, item.is_error);
-                            } else if (item.type === 'text') {
-                                html += buildMsgItem(rawRole, item.text || '');
-                            } else {
-                                html += buildMsgItem(rawRole, typeof item === 'string' ? item : JSON.stringify(item));
-                            }
-                        }
-                    } else {
-                        const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
-                        html += buildMsgItem(rawRole, contentStr);
-                    }
-                }
-                if (msgs.length > 6) {
-                    html += `<pre style="margin-top:6px;color:#4a5568">... (还有 ${msgs.length - 6} 条消息)</pre>`;
-                }
-            }
-            html += `</div>`;
-
-            // Tools - COLLAPSED by default
-            html += `<div class="detail-section collapsed" onclick="toggleDetailSection(this)">
-                <div class="detail-section-title"><span class="collapse-icon">▶</span>Tools (${tools.length})</div>`;
-            if (tools.length === 0) {
-                html += `<pre>(none)</pre>`;
-            } else {
-                html += `<div class="tools-grid">`;
-                for (const t of tools) {
-                    const name = t.name || t.function?.name || '?';
-                    html += `<span class="tool-tag">${esc(name)}</span>`;
-                }
-                html += `</div>`;
-            }
-            html += `</div>`;
-
-            detailContent.innerHTML = html;
-        }
-
-        function toggleDetailSection(el) {
-            el.classList.toggle('collapsed');
-            const icon = el.querySelector('.collapse-icon');
-            if (icon) {
-                icon.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
-            }
+            if (!wasOpen) card.classList.add('open');
         }
 
         function scrollFlow() {
@@ -827,7 +681,6 @@
             currentIterCard = null;
             currentIterContainer = null;
             currentConvContainer = null;
-            detailContent.innerHTML = '<div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>';
         }
 
         // ── Send message ────────────────────────────────
