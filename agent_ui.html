@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Agent — 执行流程</title>
+    <title>Agent编程助手</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0e14; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -176,11 +176,57 @@
         /* Iteration separator */
         .iter-sep { text-align: center; padding: 4px 10px; margin: 4px 0; }
         .iter-sep span { background: #2d1a3d; color: #d2a8ff; padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+
+        /* Conversation container - wraps one user+agent exchange */
+        .conv-container {
+            margin: 10px 0;
+            border-top: 1px solid #2a2040;
+            padding-top: 6px;
+        }
+        .conv-container:first-child { border-top: none; margin-top: 0; }
+        .conv-label {
+            font-size: 11px;
+            color: #6a5080;
+            margin-bottom: 4px;
+            padding: 0 8px;
+            font-weight: 600;
+        }
+
+        /* Iteration container - wraps all events in one iteration */
+        .iter-container {
+            margin: 6px 0;
+            border-left: 2px solid #3d2a5c;
+            padding-left: 8px;
+            border-radius: 4px;
+        }
+        .iter-container .iter-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: #1a1128;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            cursor: pointer;
+        }
+        .iter-container .iter-header:hover { background: #241838; }
+        .iter-container .iter-label { color: #d2a8ff; font-size: 12px; font-weight: 600; }
+        .iter-container .iter-badge {
+            background: #2d1a3d;
+            color: #d2a8ff;
+            padding: 1px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        .iter-container .iter-arrow { color: #666; font-size: 10px; transition: transform 0.15s; }
+        .iter-container.collapsed .iter-arrow { transform: rotate(-90deg); }
+        .iter-container.collapsed .iter-body { display: none; }
+        .iter-body { padding: 2px 0; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Claude Agent</h1>
+        <h1>Agent编程助手</h1>
         <div class="tab-bar">
             <a href="/agent" class="tab-btn active" onclick="highlightTab(this)">🤖 Agent</a>
             <a href="/" class="tab-btn" onclick="highlightTab(this)">🖥️ 终端</a>
@@ -197,7 +243,7 @@
         <div class="chat-panel">
             <div class="chat-messages" id="chatMessages">
                 <div class="msg-empty">
-                    输入消息开始体验 Agent 执行流程。<br>
+                    输入消息开始体验 Agent 编程助手。<br>
                     左侧：对话记录<br>
                     中间：执行流程时间线<br>
                     右侧：当前 Prompt 组装详情
@@ -242,11 +288,13 @@
         }
 
         // ── State ──────────────────────────────────────
-        let iterCount = 0, toolCount = 0, eventCount = 0;
+        let iterCount = 0, toolCount = 0, eventCount = 0, convCount = 0;
         let autoScroll = true;
         let selectedEvent = null;
         let currentIterTexts = [];
         let currentIterCard = null;
+        let currentIterContainer = null;
+        let currentConvContainer = null;  // wraps one full conversation in flow
         let isRunning = false;
         const container = document.getElementById('chatMessages');
         const flowContent = document.getElementById('flowContent');
@@ -282,7 +330,7 @@
             const ts = event.timestamp || '';
             const details = event.details || {};
 
-            // Text event: accumulate in current card
+            // ── Text event: accumulate in current card ──
             if (type === 'text' && currentIterCard) {
                 currentIterTexts.push(data);
                 const full = currentIterTexts.join('');
@@ -300,28 +348,63 @@
                 currentIterCard = null;
             }
 
-            // Iteration separator
+            // ── Conversation start (prompt_assembled = first event) ──
+            if (type === 'prompt_assembled') {
+                convCount++;
+                const convDiv = document.createElement('div');
+                convDiv.className = 'conv-container';
+                convDiv.innerHTML = `<div class="conv-label">对话 #${convCount}</div>`;
+                flowContent.appendChild(convDiv);
+                currentConvContainer = convDiv;
+                // Fall through: add the prompt_assembled card inside this conversation
+            }
+
+            // ── Iteration container ──
             if (type === 'iteration_start') {
                 iterCount++;
                 document.getElementById('iterCount').textContent = iterCount;
-                const sep = document.createElement('div');
-                sep.className = 'iter-sep';
-                sep.innerHTML = `<span>迭代 #${iterCount}</span>`;
-                flowContent.appendChild(sep);
+
+                const iterDiv = document.createElement('div');
+                iterDiv.className = 'iter-container';
+                iterDiv.innerHTML = `
+                    <div class="iter-header" onclick="toggleIterContainer(this)">
+                        <span class="iter-label">迭代 #${iterCount}</span>
+                        <div>
+                            <span class="iter-badge">0 工具</span>
+                            <span class="iter-arrow">▶</span>
+                        </div>
+                    </div>
+                    <div class="iter-body"></div>
+                `;
+                (currentConvContainer || flowContent).appendChild(iterDiv);
+                currentIterContainer = iterDiv;
                 currentIterTexts = [];
                 currentIterCard = null;
                 return;
             }
 
             if (type === 'iteration_end') {
+                if (currentIterContainer) {
+                    const label = currentIterContainer.querySelector('.iter-label');
+                    if (label) label.textContent += ' ✓';
+                }
+                currentIterContainer = null;
                 currentIterTexts = [];
                 currentIterCard = null;
                 return;
             }
 
+            // ── Tool call: update badge ──
             if (type === 'tool_call') {
                 toolCount++;
                 document.getElementById('toolCount').textContent = toolCount;
+                if (currentIterContainer) {
+                    const badge = currentIterContainer.querySelector('.iter-badge');
+                    if (badge) {
+                        const n = parseInt(badge.textContent) + 1;
+                        badge.textContent = n + ' 工具';
+                    }
+                }
             }
 
             eventCount++;
@@ -350,8 +433,23 @@
                 <div class="event-body">${buildBody(type, data, details)}</div>
             `;
 
-            flowContent.appendChild(card);
+            // Determine where to append: iteration > conversation > flowContent
+            let target;
+            if (currentIterContainer) {
+                target = currentIterContainer.querySelector('.iter-body');
+            } else if (currentConvContainer) {
+                target = currentConvContainer;
+            } else {
+                target = flowContent;
+            }
+            target.appendChild(card);
             scrollFlow();
+        }
+
+        // ── Toggle iteration container collapse ──
+        function toggleIterContainer(headerEl) {
+            const container = headerEl.parentElement;
+            container.classList.toggle('collapsed');
         }
 
         function buildPreview(type, data, details) {
@@ -683,12 +781,14 @@
         // ── Clear ──────────────────────────────────────
         function clearFlow() {
             flowContent.innerHTML = '<div class="flow-empty">等待开始...</div>';
-            iterCount = toolCount = eventCount = 0;
+            iterCount = toolCount = eventCount = convCount = 0;
             document.getElementById('iterCount').textContent = '0';
             document.getElementById('toolCount').textContent = '0';
             document.getElementById('eventCount').textContent = '0';
             currentIterTexts = [];
             currentIterCard = null;
+            currentIterContainer = null;
+            currentConvContainer = null;
             detailContent.innerHTML = '<div class="detail-empty">点击流程中的「prompt_assembled」事件<br>查看完整 Prompt 组装详情</div>';
         }
 
@@ -710,7 +810,6 @@
             const text = input.value.trim();
             if (!text || isRunning) return;
 
-            clearFlow();
             input.value = '';
             input.style.height = 'auto';
             addChat('user', text);
@@ -730,9 +829,9 @@
                 let textAcc = '';
 
                 while (true) {
-                    const { done, val } = await reader.read();
+                    const { done, value } = await reader.read();
                     if (done) break;
-                    buf += decoder.decode(val, { stream: true });
+                    buf += decoder.decode(value, { stream: true });
                     const lines = buf.split('\n');
                     buf = lines.pop() || '';
 

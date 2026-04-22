@@ -435,6 +435,142 @@ def proxy_api():
     return _proxy_to_api()
 
 
+@app.route("/v1/chat/completions", methods=["POST"])
+def chat_completions():
+    """Accept OpenAI-format requests, convert to Anthropic, and stream back."""
+    try:
+        req_data = request.get_json()
+        config = load_claude_config()
+
+        # Convert OpenAI messages to Anthropic format
+        messages = []
+        system_messages = []
+        for msg in req_data.get("messages", []):
+            if msg["role"] == "system":
+                system_messages.append({"type": "text", "text": msg.get("content", "")})
+            elif msg["role"] == "tool":
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id", ""),
+                        "content": msg.get("content", ""),
+                    }],
+                })
+            elif msg["role"] == "assistant":
+                assistant_content = []
+                if msg.get("content"):
+                    assistant_content.append({"type": "text", "text": msg["content"]})
+                if msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        func = tc.get("function", {})
+                        try:
+                            input_json = json.loads(func.get("arguments", "{}"))
+                        except Exception:
+                            input_json = {}
+                        assistant_content.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", "call_unknown"),
+                            "name": func.get("name", "unknown"),
+                            "input": input_json,
+                        })
+                messages.append({"role": "assistant", "content": assistant_content})
+            else:
+                messages.append({"role": msg["role"], "content": msg.get("content", "")})
+
+        # Convert tools to Anthropic format
+        tools = []
+        for t in req_data.get("tools", []):
+            func = t.get("function", {})
+            tools.append({
+                "name": func.get("name", ""),
+                "description": func.get("description", ""),
+                "input_schema": func.get("parameters", {"type": "object"}),
+            })
+
+        # Build Anthropic request
+        anthropic_req = {
+            "model": config["model"],
+            "max_tokens": 8192,
+            "system": system_messages if system_messages else None,
+            "messages": messages,
+            "tools": tools if tools else None,
+            "stream": req_data.get("stream", False),
+            "temperature": req_data.get("temperature", 0.7),
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": config["api_key"],
+            "anthropic-version": "2023-06-01",
+        }
+
+        target_url = f"{config['base_url']}/v1/messages"
+
+        if req_data.get("stream", False):
+            resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
+            ct = resp.headers.get("content-type", "")
+            content_data = resp.content
+            resp.close()
+
+            if "text/event-stream" in ct:
+                # Convert Anthropic SSE to OpenAI SSE format
+                def convert_stream():
+                    buf = ""
+                    for line in content_data.decode("utf-8", errors="replace").split("\n"):
+                        if not line.startswith("data: "):
+                            continue
+                        raw = line[6:].strip()
+                        if not raw or raw == "[DONE]":
+                            continue
+                        try:
+                            evt = json.loads(raw)
+                            evt_type = evt.get("type", "")
+                            if evt_type == "content_block_delta":
+                                delta_text = evt.get("delta", {}).get("text", "")
+                                if delta_text:
+                                    yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_text}, 'index': 0}]})}\n\n"
+                            elif evt_type == "content_block_start":
+                                content_block = evt.get("content_block", {})
+                                if content_block.get("type") == "tool_use":
+                                    tool_name = content_block.get("name", "")
+                                    tool_id = content_block.get("id", "")
+                                    yield f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': tool_id, 'type': 'function', 'function': {'name': tool_name, 'arguments': ''}}]}, 'index': 0}]})}\n\n"
+                            elif evt_type == "message_stop":
+                                yield "data: [DONE]\n\n"
+                        except Exception:
+                            pass
+
+                return Response(stream_with_context(convert_stream()), mimetype="text/event-stream")
+            else:
+                return Response(content_data, mimetype="text/event-stream")
+        else:
+            resp = httpx.post(target_url, json=anthropic_req, headers=headers, timeout=120)
+            result = resp.json()
+            resp.close()
+
+            # Convert Anthropic response to OpenAI format
+            content = ""
+            tool_calls = []
+            for block in result.get("content", []):
+                if block.get("type") == "text":
+                    content = block["text"]
+                elif block.get("type") == "tool_use":
+                    tool_calls.append({
+                        "id": block["id"],
+                        "type": "function",
+                        "function": {"name": block["name"], "arguments": json.dumps(block.get("input", {}))},
+                    })
+
+            message = {"role": "assistant", "content": content or None}
+            if tool_calls:
+                message["tool_calls"] = tool_calls
+
+            return {"choices": [{"message": message, "finish_reason": result.get("stop_reason", "stop"), "index": 0}]}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
 @app.route("/v1/messages", methods=["GET"])
 def proxy_api_get():
     config = load_claude_config()
@@ -608,166 +744,248 @@ def agent_chat():
             base_url = config["base_url"]
             model = config["model"]
 
-            # Use OpenAI-compatible API via our proxy
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+            # --- Anthropic format helpers ---
 
-            messages = []
-            messages.append({
-                "role": "system",
-                "content": "你是一个名为 mini-cc 的高级 AI 编程助手。你拥有读取文件、写入文件和执行终端命令的权限。你的目标是帮助用户解决复杂的软件工程问题。"
-            })
+            def _to_anthropic_messages(msgs):
+                """Convert OpenAI-style messages to Anthropic message content blocks."""
+                anthropic_msgs = []
+                for m in msgs:
+                    role = m["role"]
+                    content = m.get("content", "")
+                    if role == "system":
+                        continue  # system handled separately
+                    if role == "user":
+                        if isinstance(content, list):
+                            anthropic_msgs.append({"role": "user", "content": content})
+                        else:
+                            anthropic_msgs.append({"role": "user", "content": [{"type": "text", "text": str(content)}]})
+                    elif role == "assistant":
+                        blocks = []
+                        if content:
+                            blocks.append({"type": "text", "text": str(content)})
+                        for tc in m.get("tool_calls", []):
+                            blocks.append({
+                                "type": "tool_use",
+                                "id": tc["id"],
+                                "name": tc["function"]["name"],
+                                "input": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
+                            })
+                        if blocks:
+                            anthropic_msgs.append({"role": "assistant", "content": blocks})
+                    elif role == "tool":
+                        # Find the preceding assistant message and attach tool_result
+                        tool_result = {
+                            "type": "tool_result",
+                            "tool_use_id": m.get("tool_call_id", ""),
+                            "content": str(content),
+                        }
+                        # Find last assistant message to prepend this tool_result
+                        found = False
+                        for am in reversed(anthropic_msgs):
+                            if am["role"] == "assistant":
+                                # Prepend tool_result content blocks
+                                am["content"] = [{"type": "tool_result", "tool_use_id": m.get("tool_call_id", ""), "content": str(content)}] + am["content"]
+                                found = True
+                                break
+                        if not found:
+                            # Fallback: add as user message
+                            anthropic_msgs.append({"role": "user", "content": [tool_result]})
+                return anthropic_msgs
 
-            loop = _asyncio.new_event_loop()
-            _asyncio.set_event_loop(loop)
+            def _to_anthropic_tools(tools):
+                """Convert OpenAI function tools to Anthropic tool format."""
+                return [{
+                    "name": t["name"],
+                    "description": t["description"],
+                    "input_schema": t["inputSchema"],
+                } for t in AGENT_TOOLS]
+
+            # Use a queue to bridge async generator -> sync Flask stream
+            import queue as _queue
+            q = _queue.Queue()
+            sentinel = object()
 
             async def run_agent():
-                max_loops = 5
+                import httpx as _httpx
+
+                max_loops = 100
                 loop_count = 0
-                accumulated_text = ""
+                system_prompt = "你是一名agent编程助手。你拥有读取文件、写入文件和执行终端命令的权限。你的目标是帮助用户解决复杂的软件工程问题。"
 
-                # Add user message
-                messages.append({"role": "user", "content": user_message})
+                messages = [{"role": "user", "content": user_message}]
 
-                while True:
-                    loop_count += 1
-                    if loop_count > max_loops:
-                        yield _emit_event("text", data="\n[Agent] 工具调用循环次数过多，已强制终止。\n")
-                        return
+                # First call: always make the request
+                make_request = True
 
-                    # Emit iteration start
-                    yield _emit_event("iteration_start")
-
+                while make_request:
                     # Build prompt details for display
-                    sys_text = messages[0].get("content", "") if messages and messages[0]["role"] == "system" else ""
                     prompt_msgs = []
                     for m in messages:
-                        if m["role"] == "system":
-                            continue
-                        content = str(m.get("content", ""))
+                        raw = m.get("content", "")
+                        if isinstance(raw, list):
+                            # Anthropic-style content blocks
+                            texts = []
+                            for block in raw:
+                                btype = block.get("type", "")
+                                if btype == "text":
+                                    texts.append(block.get("text", ""))
+                                elif btype == "tool_use":
+                                    texts.append(f"[Tool Use: {block.get('name', '')}]")
+                                elif btype == "tool_result":
+                                    texts.append(f"[Tool Result: {block.get('tool_use_id', '')}]")
+                            content = "\n".join(texts)
+                        else:
+                            content = str(raw) if raw else ""
                         content_preview = content[:200]
-                        content_array = [{"type": "text", "text": content}]
-                        # Show tool call details for tool messages
-                        if m.get("tool_call_id"):
-                            content_preview = f"[Tool Result: {m.get('tool_call_id')}]"
                         prompt_msgs.append({
                             "role": m["role"],
                             "content": content,
-                            "content_array": content_array,
                             "tokens": _estimate_tokens(content),
                             "content_preview": content_preview,
                         })
 
                     prompt_details = {
-                        "system_prompt": sys_text,
-                        "messages": prompt_msgs[-10:],  # last 10 for display
+                        "system_prompt": system_prompt,
+                        "messages": prompt_msgs[-10:],
                         "tools": [{"name": t["name"], "description": t["description"]} for t in AGENT_TOOLS],
                     }
-                    yield _emit_event("prompt_assembled", details=prompt_details)
+                    q.put(_emit_event("prompt_assembled", details=prompt_details))
+                    q.put(_emit_event("waiting", details={"message": "等待模型响应..."}))
 
-                    # Send to model
-                    yield _emit_event("waiting", details={"message": "等待模型响应..."})
-
-                    request_options = {
+                    # Build Anthropic request
+                    anthropic_request = {
                         "model": model,
-                        "messages": messages,
-                        "tools": _tool_definitions(),
-                        "temperature": 0.2,
+                        "system": system_prompt,
+                        "messages": _to_anthropic_messages(messages),
+                        "tools": _to_anthropic_tools(AGENT_TOOLS),
+                        "max_tokens": 8192,
                         "stream": True,
                     }
 
-                    stream = await client.chat.completions.create(**request_options)
+                    # Call Anthropic API via httpx
+                    headers = {
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    }
 
                     full_content = ''
-                    tool_calls_map = {}
+                    tool_calls = []
 
-                    async for chunk in stream:
-                        delta = chunk.choices[0].delta if chunk.choices else None
-                        if not delta:
-                            continue
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            base_url + "/v1/messages",
+                            json={**anthropic_request, "stream": False},
+                            headers=headers,
+                        )
+                        if resp.status_code != 200:
+                            q.put(_emit_event("error", details={"message": f"API 请求失败 (HTTP {resp.status_code}): {resp.text[:500]}"}))
+                            return
 
-                        # Handle text content
-                        if delta.content:
-                            full_content += delta.content
-                            accumulated_text += delta.content
-                            yield _emit_event("text", data=delta.content)
+                        result = resp.json()
 
-                        # Handle tool calls
-                        if delta.tool_calls:
-                            for tc in delta.tool_calls:
-                                idx = tc.index
-                                if idx not in tool_calls_map:
-                                    tool_calls_map[idx] = {
-                                        "id": tc.id or f"call_{idx}",
-                                        "type": "function",
-                                        "function": {"name": tc.function.name or "", "arguments": ""},
-                                    }
-                                else:
-                                    if tc.function and tc.function.name:
-                                        tool_calls_map[idx]["function"]["name"] += tc.function.name
-                                    if tc.function and tc.function.arguments:
-                                        tool_calls_map[idx]["function"]["arguments"] += tc.function.arguments
+                        # Parse response content blocks
+                        for block in result.get("content", []):
+                            if block.get("type") == "text":
+                                text = block.get("text", "")
+                                full_content += text
+                                q.put(_emit_event("text", data=text))
+                            elif block.get("type") == "tool_use":
+                                tool_calls.append(block)
+                            elif block.get("type") == "thinking":
+                                pass
 
-                    # Parse tool calls
-                    final_tool_calls = []
-                    for idx, t in tool_calls_map.items():
-                        raw_args = t["function"]["arguments"] or '{}'
-                        try:
-                            args = json.loads(raw_args)
-                        except json.JSONDecodeError:
-                            try:
-                                args = json.loads(raw_args.replace('\n', '\\n').replace('\r', '\\r'))
-                            except Exception:
-                                args = {"_parse_error": True, "_raw_arguments": raw_args}
-                        final_tool_calls.append({
-                            "id": t["id"], "name": t["function"]["name"], "args": args,
-                        })
-
-                    # Build assistant message
-                    assistant_msg = {"role": "assistant", "content": full_content or None}
-                    if final_tool_calls:
-                        assistant_msg["tool_calls"] = [
-                            {"id": t["id"], "type": "function", "function": {"name": t["name"], "arguments": json.dumps(t.get("args", {}))}}
-                            for t in tool_calls_map.values()
-                        ]
-                    messages.append(assistant_msg)
-
-                    if not final_tool_calls:
-                        # No more tool calls, we're done
-                        yield _emit_event("iteration_end")
-                        return
-
-                    # Execute tool calls
-                    for tc in final_tool_calls:
-                        yield _emit_event("tool_call", details={
+                    # Build assistant message content blocks for next round
+                    assistant_blocks = []
+                    if full_content:
+                        assistant_blocks.append({"type": "text", "text": full_content})
+                    for tc in tool_calls:
+                        assistant_blocks.append({
+                            "type": "tool_use",
+                            "id": tc["id"],
                             "name": tc["name"],
-                            "input": tc["args"],
+                            "input": tc.get("input", {}),
+                        })
+                    messages.append({"role": "assistant", "content": assistant_blocks})
+
+                    if not tool_calls:
+                        # No tool calls — just a text reply, done
+                        make_request = False
+                        continue
+
+                    # ── Tool calls exist — enter iteration loop ──
+
+                    # Emit tool call events
+                    for tc in tool_calls:
+                        q.put(_emit_event("tool_call", details={
+                            "name": tc["name"],
+                            "input": tc.get("input", {}),
+                        }))
+
+                    # Execute tools — convert Anthropic tool_call format to internal format
+                    internal_tool_calls = []
+                    for tc in tool_calls:
+                        args = tc.get("input", {})
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {"_parse_error": True, "_raw_arguments": args}
+                        internal_tool_calls.append({
+                            "id": tc["id"],
+                            "name": tc["name"],
+                            "args": args,
                         })
 
-                    tool_results = await _handle_tool_calls(final_tool_calls)
+                    tool_results = await _handle_tool_calls(internal_tool_calls)
+
+                    # Emit iteration_start before tool results
+                    loop_count += 1
+                    q.put(_emit_event("iteration_start"))
 
                     for tr in tool_results:
-                        yield _emit_event("tool_result", details={
+                        q.put(_emit_event("tool_result", details={
                             "name": tr["name"],
                             "content": str(tr["result"]),
                             "is_error": tr.get("isError", False),
-                        })
+                        }))
 
-                    # Add tool results to messages
+                    # Add tool results to messages in Anthropic format
                     for tr in tool_results:
                         messages.append({
-                            "role": "tool",
-                            "tool_call_id": tr["id"],
-                            "content": str(tr["result"]),
+                            "role": "user",
+                            "content": [{
+                                "type": "tool_result",
+                                "tool_use_id": tr["id"],
+                                "content": str(tr["result"]),
+                            }],
                         })
 
-            try:
-                for event in loop.run_until_complete(run_agent()):
-                    yield event
-            except Exception as e:
-                yield _emit_event("error", details={"message": str(e)})
-            finally:
-                loop.close()
+                    q.put(_emit_event("iteration_end"))
+
+                    if loop_count >= max_loops:
+                        q.put(_emit_event("text", data="\n[Agent] 工具调用循环次数过多，已强制终止。\n"))
+                        return
+
+            def async_runner():
+                new_loop = _asyncio.new_event_loop()
+                _asyncio.set_event_loop(new_loop)
+                try:
+                    new_loop.run_until_complete(run_agent())
+                except Exception as e:
+                    q.put(_emit_event("error", details={"message": str(e)}))
+                finally:
+                    new_loop.close()
+                q.put(sentinel)
+
+            t = threading.Thread(target=async_runner, daemon=True)
+            t.start()
+
+            while True:
+                item = q.get()
+                if item is sentinel:
+                    break
+                yield item
 
         return Response(stream_with_context(generate()), mimetype="text/event-stream")
     except Exception as e:
