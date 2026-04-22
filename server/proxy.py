@@ -206,6 +206,33 @@ def chat_completions():
         req_data = request.get_json()
         config = load_claude_config()
 
+        # ── Capture prompt for display in capture UI ──
+        raw_messages = req_data.get("messages", [])
+        raw_tools = req_data.get("tools", [])
+        raw_system = [m.get("content", "") for m in raw_messages if m.get("role") == "system"]
+        parsed_msgs = []
+        for msg in raw_messages:
+            content = msg.get("content", "")
+            parsed_msgs.append({
+                "role": msg["role"],
+                "content": str(content),
+                "content_preview": str(content)[:500] if content else "",
+                "tokens": 0,
+            })
+        capture_entry = {
+            "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            "model": config.get("model", "unknown"),
+            "system_prompt": "\n".join(raw_system) if raw_system else "",
+            "system_tokens": 0,
+            "system_reminders": [],
+            "messages": parsed_msgs,
+            "tools_count": len(raw_tools),
+            "tools": raw_tools[:20],
+        }
+        captured_requests.append(capture_entry)
+        if len(captured_requests) > 500:
+            captured_requests.pop(0)
+
         # Convert OpenAI messages to Anthropic format
         messages = []
         system_messages = []
